@@ -1,0 +1,21 @@
+# Never upload secrets, local data, or non-app folders to Vercel (anchored to repo root)
+.env
+.env.*
+**/.env
+**/.env.*
+*.local
+*.bak*
+/fabricut-secrets
+*adminsdk*.json
+/data
+/logs
+*.log
+node_modules
+/server
+/legacy
+/dist
+/design
+/.next
+.git
+.DS_Store
+*.tsbuildinfo

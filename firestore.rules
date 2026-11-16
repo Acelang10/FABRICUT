@@ -1,0 +1,17 @@
+rules_version = '2';
+// Products and orders are read and written only by the Next.js API using
+// the Firebase Admin SDK. Direct client access is denied, including public
+// product reads. Do not relax these rules without a reviewed security model.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /products/{id} {
+      allow read, write: if false;
+    }
+    match /orders/{id} {
+      allow read, write: if false;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
