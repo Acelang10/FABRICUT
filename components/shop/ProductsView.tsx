@@ -5,9 +5,9 @@ import {addToCart,readCart,writeCart} from '@/lib/client/cart'
 import {peso} from '@/lib/format'
 import {clothingLabel,clothingType} from '@/lib/clothing'
 import type {AppUser,ShopProduct} from '@/lib/types'
-import ProductArt from './ProductArt'
 import FabricList from './FabricList'
 import GarmentPattern from '../GarmentPattern'
+import ProductMedia from '../ProductMedia'
 
 interface Choice {style:string;size:string}
 
@@ -64,8 +64,7 @@ export default function ProductsView(){
           const type=clothingType(product.clothingType)
           return (
             <article key={product.id} className="atelier-card">
-              {product.imageUrl?<ProductArt imageUrl={product.imageUrl} name={product.name}/>:null}
-              <GarmentPattern type={product.clothingType} style={choice.style} size={product.imageUrl?'md':'lg'}/>
+              <ProductMedia imageUrl={product.imageUrl} name={product.name} clothingType={product.clothingType} style={choice.style}/>
               <div className="atelier-meta">
                 <div className="atelier-cat">{type.label}</div>
                 <h2>{product.name}</h2>

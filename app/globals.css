@@ -2433,3 +2433,26 @@ button.atelier-bell{
   .prod-line{grid-template-columns:1fr}
   .lc-stop-bar{flex-direction:column;align-items:stretch}
 }
+
+/* ---- Images (Cloudinary), Photo/Pattern toggle, Profile ---- */
+.image-upload{border:1px solid var(--l);border-radius:14px;padding:10px 12px;margin:0;display:flex;flex-direction:column;gap:10px}
+.image-upload legend{font-size:12px;font-weight:700;color:var(--m);padding:0 4px}
+.image-upload-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.image-upload-preview{width:96px;height:96px;border-radius:12px;background:var(--s);border:1px solid var(--l);display:flex;align-items:center;justify-content:center;overflow:hidden;flex:none;font-size:11px;color:var(--m);text-align:center}
+.image-upload-preview.round{border-radius:50%}
+.image-upload-preview img{width:100%;height:100%;object-fit:cover;display:block}
+.image-upload-actions{display:flex;flex-direction:column;align-items:flex-start;gap:6px;flex:1;min-width:160px}
+.image-upload-off{margin:0;padding:8px 10px;border-radius:10px;background:#FFF6D6;color:var(--n);font-weight:700}
+.inventory-thumb{width:36px;height:36px;border-radius:8px;object-fit:cover;flex:none;border:1px solid var(--l);background:var(--s)}
+.product-media{position:relative}
+.product-media .atelier-art{height:180px}
+.media-toggle{position:absolute;top:10px;right:10px;display:flex;background:#ffffffee;border:1px solid var(--l);border-radius:999px;padding:3px;box-shadow:0 4px 12px #0f1f4a1f}
+.media-toggle button{border:0;background:transparent;color:var(--n);font:inherit;font-size:12px;font-weight:800;padding:5px 12px;border-radius:999px;cursor:pointer}
+.media-toggle button.on{background:var(--n);color:#fff}
+.media-toggle button:focus-visible{outline:2px solid var(--y);outline-offset:1px}
+a.atelier-user-item{display:block;text-decoration:none;box-sizing:border-box}
+.profile-page{max-width:640px}
+.profile-card{background:#fff;border:1px solid var(--l);border-radius:22px;padding:22px;display:flex;flex-direction:column;gap:12px}
+.profile-card label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:var(--m)}
+.profile-card input,.profile-card textarea{border:1px solid var(--l);border-radius:12px;padding:10px 12px;font-weight:600;color:var(--i);font:inherit}
+.profile-card input[readonly]{background:var(--s)}

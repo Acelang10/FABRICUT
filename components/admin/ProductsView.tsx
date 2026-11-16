@@ -4,7 +4,8 @@ import {api} from '@/lib/client/api'
 import {peso} from '@/lib/format'
 import {availableFabricOptions,fabricOptionLabel} from '@/lib/fabrics'
 import type {Product,ShopProduct,ShopProductStatus} from '@/lib/types'
-import ProductArt from '../shop/ProductArt'
+import ProductMedia from '../ProductMedia'
+import ImageUpload from '../ImageUpload'
 import FabricList from '../shop/FabricList'
 import GarmentPattern from '../GarmentPattern'
 import {CLOTHING_SIZES,CLOTHING_TYPES,clothingLabel,clothingType,garmentError,sortSizes,styleLabel} from '@/lib/clothing'
@@ -136,7 +137,7 @@ export default function AdminProductsView(){
       <div className="atelier-grid">
         {products.map(product=>(
           <article key={product.id} className="atelier-card">
-            {product.imageUrl?<ProductArt imageUrl={product.imageUrl} name={product.name}/>:<GarmentPattern type={product.clothingType} style={product.patternStyles[0]}/>}
+            <ProductMedia imageUrl={product.imageUrl} name={product.name} clothingType={product.clothingType} style={product.patternStyles[0]}/>
             <div className="atelier-meta">
               <div className="atelier-cat">{clothingLabel(product.clothingType)}</div>
               <div className="atelier-card-top">
@@ -205,7 +206,7 @@ export default function AdminProductsView(){
                 </select>
               </label>
             </div>
-            <label>Image link (optional)<input value={form.imageUrl} onChange={e=>setForm({...form,imageUrl:e.target.value})} placeholder="https://… or /logo.jpg" maxLength={500}/></label>
+            <ImageUpload kind="products" label="Product photo" value={form.imageUrl} onChange={url=>setForm(f=>({...f,imageUrl:url}))}/>
             <label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} maxLength={2000} rows={3}/></label>
 
             <fieldset className="atelier-fabric-rows">

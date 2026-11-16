@@ -3,18 +3,31 @@ import {PRODUCT_CATEGORIES,ORDER_STATUSES,SHOP_PRODUCT_STATUSES} from '../types'
 import {PRODUCTION_STAGES} from '../clothing'
 
 const text = z.string().trim().min(1).max(200)
-export const productInputSchema = z.object({
+const imageUrl = z.string().trim().max(500).refine(
+  value => value === '' || /^https:\/\/[^\s"'<>]+$/i.test(value) || /^\/(?!\/)[^\s"'<>]*$/.test(value),
+  {message: 'Image must be an https:// link or a /path on this site'},
+)
+const inventoryShape = {
   name: text,
   category: z.enum(PRODUCT_CATEGORIES),
   price: z.number().finite().gt(0).max(10_000_000),
   // Inventory can be fractional (e.g. 16.5 yd left after a product used 1.5 yd).
   stock: z.number().finite().min(0).max(1_000_000).transform(v => Math.round(v * 100) / 100),
   unit: z.string().trim().min(1).max(40),
-  description: z.string().trim().max(2000).default(''),
-  imageColor: z.string().trim().min(1).max(40).default('swatch'),
-  active: z.boolean().default(true),
+  description: z.string().trim().max(2000),
+  imageColor: z.string().trim().min(1).max(40),
+  imageUrl,
+  active: z.boolean(),
+}
+export const productInputSchema = z.object({
+  ...inventoryShape,
+  description: inventoryShape.description.default(''),
+  imageColor: inventoryShape.imageColor.default('swatch'),
+  imageUrl: imageUrl.default(''),
+  active: inventoryShape.active.default(true),
 }).strict()
-export const productUpdateSchema = productInputSchema.partial()
+// No defaults on update, so hiding an item never wipes its description, swatch or photo.
+export const productUpdateSchema = z.object(inventoryShape).partial().strict()
 
 export const orderItemRequestSchema = z.object({
   productId: z.string().trim().min(1).max(80),
@@ -28,10 +41,6 @@ export const orderItemRequestSchema = z.object({
 
 export const lineProgressSchema = z.object({progress: z.enum(PRODUCTION_STAGES)}).strict()
 
-const imageUrl = z.string().trim().max(500).refine(
-  value => value === '' || /^https:\/\/[^\s"'<>]+$/i.test(value) || /^\/(?!\/)[^\s"'<>]*$/.test(value),
-  {message: 'Image must be an https:// link or a /path on this site'},
-)
 export const fabricUseRequestSchema = z.object({
   inventoryItemId: z.string().trim().min(1).max(80),
   quantity: z.number().finite().gt(0).max(100_000),
@@ -79,3 +88,25 @@ export const markNotificationsReadSchema = z.object({
   ids: z.array(z.string().trim().min(1).max(80)).max(100).optional(),
   all: z.boolean().optional(),
 }).strict().refine(data => data.all === true || (data.ids !== undefined && data.ids.length > 0), {message: 'Provide ids or all'})
+
+const optionalText = (max: number) => z.string().trim().max(max)
+/** Own-profile edit. strict(): no id/uid/role fields can be smuggled in. */
+export const profileUpdateSchema = z.object({
+  displayName: optionalText(80),
+  phone: optionalText(30).refine(v => v === '' || /^[0-9+()\-.\s]{5,30}$/.test(v), {message: 'Phone can only use digits, spaces, + - ( ) .'}),
+  address: optionalText(300),
+  birthday: z.string().trim().refine(v => {
+    if (v === '') return true
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false
+    const d = new Date(`${v}T00:00:00Z`)
+    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== v) return false
+    return d.getTime() <= Date.now() && d.getUTCFullYear() >= 1900
+  }, {message: 'Birthday must be a real past date (YYYY-MM-DD)'}),
+  photoUrl: z.string().trim().max(500).refine(v => v === '' || /^https:\/\/[^\s"'<>]+$/i.test(v), {message: 'Photo must be an https:// link'}),
+}).partial().strict().refine(data => Object.keys(data).length > 0, {message: 'No fields to update'})
+
+export const uploadSignSchema = z.object({kind: z.enum(['inventory','products','avatars','test'])}).strict()
+export const uploadConfirmSchema = z.object({
+  kind: z.enum(['inventory','products','avatars','test']),
+  publicId: z.string().trim().min(1).max(300).regex(/^[A-Za-z0-9_\/-]+$/),
+}).strict()

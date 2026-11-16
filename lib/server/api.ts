@@ -4,13 +4,15 @@ import {mkdir,writeFile,readFile,realpath} from 'node:fs/promises'
 import {ZodError} from 'zod'
 import {firebaseConfig} from './config'
 import {bearer,verifiedIdentity,verifyToken,type Identity} from './identity'
-import {lineProgressSchema,markNotificationsReadSchema,placeOrderSchema,productInputSchema,productUpdateSchema,shopProductInputSchema,shopProductUpdateSchema,updateOrderSchema} from './shop-schema'
+import {lineProgressSchema,markNotificationsReadSchema,placeOrderSchema,productInputSchema,productUpdateSchema,profileUpdateSchema,shopProductInputSchema,shopProductUpdateSchema,updateOrderSchema,uploadConfirmSchema,uploadSignSchema} from './shop-schema'
 import {StoreError,buildReports,shopStore,type ShopStore} from './store'
 import {announceLineProgress,announceAdminOrderUpdate,announceLowStock,announceOrderCancelledByCustomer,announceOrderPlaced,lowStockThreshold} from './notifications'
 import type {AppUser,FabricUse} from '../types'
 import {round2} from '../fabrics'
 import {garmentError,withGarmentDefaults} from '../clothing'
 import {esp32Request,localControllerEnabled,type FetchLike} from './localController'
+import {cloudinaryClient,cloudinaryCredentials,deliveryUrl,signUpload,uploadProblem,type CloudinaryClient,type CloudinaryCredentials} from './cloudinary'
+import {ADMIN_UPLOAD_KINDS,MAX_UPLOAD_BYTES,type UploadKind} from '../media'
 import {clearCookieHeader,cookieHeader,readCookie,signSession,verifySession,type Session} from '../auth/session'
 
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}
@@ -31,6 +33,15 @@ export interface Dependencies {
   localController?:(req:Request)=>boolean
   esp32Fetch?:FetchLike
   esp32BaseUrl?:string
+  /** Cloudinary credentials (tests); default reads CLOUDINARY_URL / CLOUDINARY_* env. */
+  cloudinary?:()=>CloudinaryCredentials|null
+  cloudinaryClient?:CloudinaryClient
+}
+
+/** Profile doc id: the env admin is 'admin'; customers use their Firebase uid. */
+export function profileKey(user:AppUser){
+  if(user.role==='admin') return 'admin'
+  return user.uid==='admin'?'customer_admin':user.uid
 }
 
 async function parseBody(req:Request){
@@ -221,6 +232,40 @@ export function createHandler(deps:Dependencies={}){
       const user=toUser(session)
 
       if((route==='auth/me'||route==='auth/session')&&method==='GET') return json({user})
+
+      // Cloudinary signed uploads: the browser sends the file straight to Cloudinary (no Vercel body limit).
+      if(segments[0]==='uploads'&&(route==='uploads/config'||route==='uploads/sign'||route==='uploads/confirm')){
+        const creds=(deps.cloudinary||(()=>cloudinaryCredentials()))()
+        if(route==='uploads/config'&&method==='GET') return json({configured:Boolean(creds),maxBytes:MAX_UPLOAD_BYTES})
+        if(method!=='POST') return json({error:'Method not allowed'},405)
+        const raw=await parseBody(req)
+        const body:{kind:UploadKind;publicId?:string}=route==='uploads/sign'?uploadSignSchema.parse(raw):uploadConfirmSchema.parse(raw)
+        if(ADMIN_UPLOAD_KINDS.includes(body.kind)&&user.role!=='admin') return json({error:'Admin access required'},403)
+        if(!creds) return json({error:'Image upload not configured',configured:false},503)
+        if(route==='uploads/sign') return json(signUpload(creds,body.kind,user.uid))
+        const publicId=body.publicId||''
+        const client=deps.cloudinaryClient||cloudinaryClient
+        const ownerOk=uploadProblem(body.kind,user.uid,publicId,{public_id:publicId,bytes:0,format:'png',resource_type:'image'})
+        if(ownerOk) return json({error:ownerOk.error},ownerOk.status)
+        const resource=await client.resource(creds,publicId)
+        const problem=uploadProblem(body.kind,user.uid,publicId,resource)
+        if(problem){
+          if(resource) await client.destroy(creds,publicId)
+          return json({error:problem.error},problem.status)
+        }
+        return json({url:deliveryUrl(creds.cloudName,body.kind,publicId,resource!.version),publicId,bytes:resource!.bytes})
+      }
+
+      // Own profile only: there is no route that takes another user's id.
+      if(route==='profile'){
+        const key=profileKey(user)
+        if(method==='GET') return json(await store().getProfile(key))
+        if(method==='PUT'||method==='PATCH'){
+          const patch=profileUpdateSchema.parse(await parseBody(req))
+          return json(await store().saveProfile(key,patch))
+        }
+        return json({error:'Method not allowed'},405)
+      }
 
       if((segments[0]==='pattern-files'||segments[0]==='uploads')&&segments[1]&&method==='GET'){
         if(user.role!=='admin') return json({error:'Admin access required'},403)

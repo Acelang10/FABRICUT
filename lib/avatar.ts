@@ -16,6 +16,11 @@ export function displayName(user:{role?:string;name?:string|null;email?:string|n
   return (user.email||'').split('@')[0]||'Customer'
 }
 
+/** Avatar photo order: saved profile photo, then Google photo, then none (initial is shown). */
+export function pickAvatarPhoto(profilePhoto:string|null|undefined,googlePhoto:string|null|undefined){
+  return safePhotoUrl(profilePhoto)||safePhotoUrl(googlePhoto)
+}
+
 /** Only https Google/Firebase profile photos are shown. */
 export function safePhotoUrl(url:string|null|undefined){
   if(!url) return ''

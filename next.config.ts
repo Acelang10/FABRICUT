@@ -3,7 +3,7 @@ const firebaseAuthHost = 'https://fabricut-248b4.firebaseapp.com'
 const config: NextConfig = {
   poweredByHeader: false,
   outputFileTracingExcludes: { '/*': ['./server/.env','./server/uploads/**/*','./server/node_modules/**/*','./.git/**/*'] },
-  serverExternalPackages: ['firebase','jose','firebase-admin'],
+  serverExternalPackages: ['firebase','jose','firebase-admin','cloudinary'],
   async headers() { return [{ source: '/api/:path*', headers: [{key:'Cache-Control',value:'no-store'},{key:'X-Content-Type-Options',value:'nosniff'}] }] },
   async rewrites() {
     return [

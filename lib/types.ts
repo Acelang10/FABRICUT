@@ -28,6 +28,8 @@ export interface Product extends Meta {
   unit:string
   description:string
   imageColor:string
+  /** Optional photo (Cloudinary or other https link). */
+  imageUrl?:string
   active:boolean
 }
 export const SHOP_PRODUCT_STATUSES = ['draft','active'] as const
@@ -82,4 +84,17 @@ export interface ShopNotification {
   link:string
   read:boolean
   createdAt:string
+}
+
+/** Editable personal info. Stored per signed-in user (doc id = uid; the env admin uses 'admin'). */
+export interface UserProfile {
+  id:string
+  displayName:string
+  phone:string
+  address:string
+  /** YYYY-MM-DD or '' */
+  birthday:string
+  /** https photo (Cloudinary avatar); '' = use Google photo, then initial. */
+  photoUrl:string
+  updatedAt?:string
 }

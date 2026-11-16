@@ -10,6 +10,8 @@ import type {AppUser} from '@/lib/types'
 import CartDrawer from './CartDrawer'
 import NotificationBell from '@/components/NotificationBell'
 import UserMenu from '@/components/UserMenu'
+import {useOwnProfile} from '@/lib/client/profile'
+import {pickAvatarPhoto} from '@/lib/avatar'
 
 export default function ShopShell({children,openCart=false}:{children:ReactNode;openCart?:boolean}){
   const [user,setUser]=useState<AppUser|null>(null)
@@ -17,6 +19,7 @@ export default function ShopShell({children,openCart=false}:{children:ReactNode;
   const [cartOpen,setCartOpen]=useState(openCart)
   const [photoURL,setPhotoURL]=useState<string|null>(null)
   const [profileName,setProfileName]=useState<string|null>(null)
+  const profile=useOwnProfile(Boolean(user))
   const pathname=usePathname()
   const router=useRouter()
 
@@ -71,7 +74,7 @@ export default function ShopShell({children,openCart=false}:{children:ReactNode;
         <button type="button" className="atelier-cart-btn" onClick={()=>setCartOpen(true)}>
           Cart <span className="atelier-badge">{cartCount(lines)}</span>
         </button>
-        <UserMenu tone="shop" user={user?{...user,name:user.name||profileName}:null} photoURL={photoURL} onLogout={signout}/>
+        <UserMenu tone="shop" profileHref="/shop/profile" user={user?{...user,name:profile?.displayName||user.name||profileName}:null} photoURL={pickAvatarPhoto(profile?.photoUrl,photoURL)} onLogout={signout}/>
       </header>
       <div className="atelier-shop-page">{user?children:<p role="status">Loading shop…</p>}</div>
       {user?(

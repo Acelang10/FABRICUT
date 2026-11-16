@@ -8,10 +8,13 @@ import type {AppUser} from '@/lib/types'
 import NotificationBell from '@/components/NotificationBell'
 import UserMenu from '@/components/UserMenu'
 import {adminTabs} from '@/lib/adminNav'
+import {useOwnProfile} from '@/lib/client/profile'
+import {pickAvatarPhoto} from '@/lib/avatar'
 
 export default function AdminShell({children,localController=false}:{children:ReactNode;localController?:boolean}){
   const [user,setUser]=useState<AppUser|null>(null)
   const [error,setError]=useState('')
+  const profile=useOwnProfile(Boolean(user))
   const pathname=usePathname()
   const router=useRouter()
 
@@ -53,7 +56,7 @@ export default function AdminShell({children,localController=false}:{children:Re
           ))}
         </nav>
         <NotificationBell tone="admin"/>
-        <UserMenu tone="admin" user={user||{role:'admin',name:'admin'}} onLogout={signout}/>
+        <UserMenu tone="admin" profileHref="/admin/profile" user={{...(user||{role:'admin'}),name:profile?.displayName||user?.name||'admin'}} photoURL={pickAvatarPhoto(profile?.photoUrl,null)} onLogout={signout}/>
       </header>
       <div className="atelier-page">
         {error?<p className="atelier-error" role="alert">{error}</p>:null}

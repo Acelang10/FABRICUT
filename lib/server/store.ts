@@ -1,7 +1,7 @@
 import {mkdir,readFile,rename,writeFile} from 'node:fs/promises'
 import path from 'node:path'
 import {randomUUID} from 'node:crypto'
-import type {NotificationType,OrderItem,OrderLineKind,OrderStatus,Product,ShopNotification,ShopOrder,ShopProduct} from '../types'
+import type {NotificationType,OrderItem,OrderLineKind,OrderStatus,Product,ShopNotification,ShopOrder,ShopProduct,UserProfile} from '../types'
 import {inventoryUsage,productUsage,round2} from '../fabrics'
 import {canMoveStage,withGarmentDefaults,type GarmentFields,type ProductionStage} from '../clothing'
 import {LOW_STOCK_THRESHOLD} from '../types'
@@ -14,7 +14,15 @@ export interface ProductInput {
   unit:string
   description:string
   imageColor:string
+  imageUrl?:string
   active:boolean
+}
+
+export type ProfilePatch = Partial<Omit<UserProfile,'id'|'updatedAt'>>
+
+/** Empty profile for a user who has not saved one yet. */
+export function emptyProfile(id:string):UserProfile{
+  return {id,displayName:'',phone:'',address:'',birthday:'',photoUrl:''}
 }
 
 export type ShopProductInput = Omit<ShopProduct,'id'|'createdAt'|'updatedAt'|keyof GarmentFields> & Partial<GarmentFields>
@@ -49,6 +57,9 @@ export interface ShopStore {
   unreadCount(recipient:string):Promise<number>
   createNotification(input:NotificationInput):Promise<ShopNotification>
   markNotificationsRead(recipient:string,ids:string[]|'all'):Promise<number>
+  /** Profile by owner key ('admin' or the customer uid). Never null: unsaved = empty profile. */
+  getProfile(id:string):Promise<UserProfile>
+  saveProfile(id:string,patch:ProfilePatch):Promise<UserProfile>
 }
 
 export interface NotificationInput {
@@ -65,7 +76,7 @@ export class StoreError extends Error {
 }
 
 /** products = admin inventory (raw materials); shopProducts = sellable products. */
-interface DataFile {products:Product[];shopProducts:ShopProduct[];orders:ShopOrder[];notifications:ShopNotification[]}
+interface DataFile {products:Product[];shopProducts:ShopProduct[];orders:ShopOrder[];notifications:ShopNotification[];profiles:UserProfile[]}
 
 export function mergeQty(items:{productId:string;qty:number;kind?:OrderLineKind;size?:string;style?:string}[]){
   const map=new Map<string,{productId:string;qty:number;kind:OrderLineKind;size?:string;style?:string}>()
@@ -232,7 +243,7 @@ function restoreStock(data:DataFile,order:ShopOrder){
 }
 
 export function createMemoryStore(seed?:Partial<DataFile>):ShopStore{
-  const data:DataFile={products:[...(seed?.products||[])],shopProducts:[...(seed?.shopProducts||[])],orders:[...(seed?.orders||[])],notifications:[...(seed?.notifications||[])]}
+  const data:DataFile={products:[...(seed?.products||[])],shopProducts:[...(seed?.shopProducts||[])],orders:[...(seed?.orders||[])],notifications:[...(seed?.notifications||[])],profiles:[...(seed?.profiles||[])]}
   return implementation(()=>Promise.resolve(data), async next=>{ Object.assign(data,next) })
 }
 
@@ -387,6 +398,18 @@ function implementation(load:()=>Promise<DataFile>, persist:(data:DataFile)=>Pro
       if(count) await persist(data)
       return count
     })},
+    getProfile(id){return locked(async()=>{
+      const found=(await load()).profiles.find(p=>p.id===id)
+      return found?{...found}:emptyProfile(id)
+    })},
+    saveProfile(id,patch){return locked(async()=>{
+      const data=await load()
+      let profile=data.profiles.find(p=>p.id===id)
+      if(!profile){ profile=emptyProfile(id); data.profiles.push(profile) }
+      Object.assign(profile,patch,{id,updatedAt:new Date().toISOString()})
+      await persist(data)
+      return {...profile}
+    })},
   }
 }
 
@@ -412,11 +435,11 @@ export function createJsonStore(file=path.join(process.cwd(),'data','store.json'
     try{
       const raw=await readFile(/* turbopackIgnore: true */ file,'utf8')
       const parsed=JSON.parse(raw) as DataFile
-      cache={products:parsed.products||[],shopProducts:parsed.shopProducts||[],orders:parsed.orders||[],notifications:parsed.notifications||[]}
+      cache={products:parsed.products||[],shopProducts:parsed.shopProducts||[],orders:parsed.orders||[],notifications:parsed.notifications||[],profiles:parsed.profiles||[]}
     }catch(error){
       const code=(error as NodeJS.ErrnoException).code
       if(code!=='ENOENT') throw error
-      cache={products:sampleProducts(),shopProducts:[],orders:[],notifications:[]}
+      cache={products:sampleProducts(),shopProducts:[],orders:[],notifications:[],profiles:[]}
       await persist(cache)
     }
     return cache
@@ -425,7 +448,7 @@ export function createJsonStore(file=path.join(process.cwd(),'data','store.json'
     cache=data
     await mkdir(/* turbopackIgnore: true */ path.dirname(file),{recursive:true})
     const temp=`${file}.${process.pid}.tmp`
-    await writeFile(/* turbopackIgnore: true */ temp,JSON.stringify({products:data.products,shopProducts:data.shopProducts||[],orders:data.orders,notifications:data.notifications||[]},null,2),'utf8')
+    await writeFile(/* turbopackIgnore: true */ temp,JSON.stringify({products:data.products,shopProducts:data.shopProducts||[],orders:data.orders,notifications:data.notifications||[],profiles:data.profiles||[]},null,2),'utf8')
     await rename(/* turbopackIgnore: true */ temp, /* turbopackIgnore: true */ file)
   }
   return implementation(load,persist)
@@ -505,6 +528,8 @@ export function createResilientStore():ShopStore{
     unreadCount:(recipient)=>resolve().then(s=>s.unreadCount(recipient)),
     createNotification:(input)=>resolve().then(s=>s.createNotification(input)),
     markNotificationsRead:(recipient,ids)=>resolve().then(s=>s.markNotificationsRead(recipient,ids)),
+    getProfile:(id)=>resolve().then(s=>s.getProfile(id)),
+    saveProfile:(id,patch)=>resolve().then(s=>s.saveProfile(id,patch)),
   }
 }
 

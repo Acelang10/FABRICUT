@@ -1,8 +1,8 @@
 import {randomUUID} from 'node:crypto'
 import type {DocumentData,Firestore} from 'firebase-admin/firestore'
 import type {DocumentReference,DocumentSnapshot,Transaction} from 'firebase-admin/firestore'
-import type {FabricUse,OrderItem,OrderStatus,Product,ShopNotification,ShopOrder,ShopProduct} from '../types'
-import {StoreError,mergeQty,moveLineProgress,orderLines,type NotificationInput,type PlaceOrderInput,type ProductInput,type ShopProductInput,type ShopStore} from './store'
+import type {FabricUse,OrderItem,OrderStatus,Product,ShopNotification,ShopOrder,ShopProduct,UserProfile} from '../types'
+import {StoreError,emptyProfile,mergeQty,moveLineProgress,orderLines,type NotificationInput,type PlaceOrderInput,type ProductInput,type ShopProductInput,type ShopStore} from './store'
 import {inventoryUsage,productUsage,round2} from '../fabrics'
 import {PRODUCTION_STAGES,withGarmentDefaults,type ProductionStage} from '../clothing'
 import {adminFirestore} from './firebaseAdmin'
@@ -17,6 +17,7 @@ function productFrom(id:string,data:DocumentData):Product{
     unit:String(data.unit||''),
     description:String(data.description||''),
     imageColor:String(data.imageColor||'swatch'),
+    imageUrl:String(data.imageUrl||''),
     active:data.active!==false,
     createdAt:String(data.createdAt||''),
     updatedAt:String(data.updatedAt||''),
@@ -96,7 +97,7 @@ function orderFrom(id:string,data:DocumentData):ShopOrder{
 
 function productFields(input:ProductInput|Product){
   const {name,category,price,stock,unit,description,imageColor,active}=input
-  return {name,category,price,stock,unit,description,imageColor,active}
+  return {name,category,price,stock,unit,description,imageColor,imageUrl:input.imageUrl||'',active}
 }
 
 /** Firestore-safe copy of order lines (no undefined fields). */
@@ -108,6 +109,19 @@ function linePayload(items:OrderItem[]){
     for(const key of ['clothingType','style','size','progress','progressUpdatedAt'] as const){ if(item[key]) line[key]=item[key] }
     return line
   })
+}
+
+function profileFrom(id:string,data:DocumentData|undefined):UserProfile{
+  if(!data) return emptyProfile(id)
+  return {
+    id,
+    displayName:String(data.displayName||''),
+    phone:String(data.phone||''),
+    address:String(data.address||''),
+    birthday:String(data.birthday||''),
+    photoUrl:String(data.photoUrl||''),
+    updatedAt:String(data.updatedAt||''),
+  }
 }
 
 function notificationFrom(id:string,data:DocumentData):ShopNotification{
@@ -163,6 +177,7 @@ export function createFirestoreStore(db:Firestore=adminFirestore()):ShopStore{
     for(const [ref,stock] of writes) tx.update(ref,{stock,updatedAt:now})
   }
   const notifications=db.collection('notifications')
+  const profiles=db.collection('profiles')
 
   return {
     async listProducts(){
@@ -362,6 +377,19 @@ export function createFirestoreStore(db:Firestore=adminFirestore()):ShopStore{
         await batch.commit()
       }
       return pending.length
+    },
+    async getProfile(id){
+      const snap=await profiles.doc(id).get()
+      return profileFrom(id,snap.exists?snap.data():undefined)
+    },
+    async saveProfile(id,patch){
+      const ref=profiles.doc(id)
+      const updatedAt=new Date().toISOString()
+      const clean:Record<string,string>={}
+      for(const [key,value] of Object.entries(patch)) if(typeof value==='string') clean[key]=value
+      await ref.set({...clean,updatedAt},{merge:true})
+      const snap=await ref.get()
+      return profileFrom(id,snap.data())
     },
   }
 }

@@ -4,8 +4,9 @@ import {api} from '@/lib/client/api'
 import {peso} from '@/lib/format'
 import {LOW_STOCK_THRESHOLD,PRODUCT_CATEGORIES,type Product,type ProductCategory} from '@/lib/types'
 import Swatch from './Swatch'
+import ImageUpload from '../ImageUpload'
 
-const emptyForm={name:'',category:'Fabrics' as ProductCategory,price:'',stock:'',unit:'yd',description:'',imageColor:'pina',active:true}
+const emptyForm={name:'',category:'Fabrics' as ProductCategory,price:'',stock:'',unit:'yd',description:'',imageColor:'pina',imageUrl:'',active:true}
 
 export default function InventoryView(){
   const [products,setProducts]=useState<Product[]>([])
@@ -40,6 +41,7 @@ export default function InventoryView(){
       unit:product.unit,
       description:product.description,
       imageColor:product.imageColor,
+      imageUrl:product.imageUrl||'',
       active:product.active,
     })
     setOpen(true)
@@ -57,6 +59,7 @@ export default function InventoryView(){
         unit:form.unit,
         description:form.description,
         imageColor:form.imageColor,
+        imageUrl:form.imageUrl.trim(),
         active:form.active,
       }
       if(editing) await api(`/products/${encodeURIComponent(editing.id)}`,'PUT',payload)
@@ -105,7 +108,7 @@ export default function InventoryView(){
             <tbody>
               {products.map(product=>(
                 <tr key={product.id}>
-                  <td><span className="atelier-cell"><Swatch tone={product.imageColor}/><strong>{product.name}</strong></span></td>
+                  <td><span className="atelier-cell"><InventoryThumb product={product}/><strong>{product.name}</strong></span></td>
                   <td>{product.category}</td>
                   <td>{peso(product.price)}{product.unit==='yd'?' / yd':` / ${product.unit}`}</td>
                   <td className={product.stock<=LOW_STOCK_THRESHOLD?'atelier-low':undefined}>{product.stock} {product.unit}{product.stock<=LOW_STOCK_THRESHOLD?' · low':''}</td>
@@ -141,6 +144,7 @@ export default function InventoryView(){
                 {['pina','twill','patch','lace','lining','kit','swatch'].map(c=><option key={c} value={c}>{c}</option>)}
               </select>
             </label>
+            <ImageUpload kind="inventory" label="Item photo" value={form.imageUrl} onChange={url=>setForm(f=>({...f,imageUrl:url}))}/>
             <label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} maxLength={2000} rows={3}/></label>
             <label className="atelier-check"><input type="checkbox" checked={form.active} onChange={e=>setForm({...form,active:e.target.checked})}/> Active (available for products and walk-in orders)</label>
             <div className="atelier-dialog-actions">
@@ -152,4 +156,12 @@ export default function InventoryView(){
       ):null}
     </>
   )
+}
+
+/** Photo thumbnail when the item has one (falls back to the swatch if it fails to load). */
+function InventoryThumb({product}:{product:Product}){
+  const [failed,setFailed]=useState(false)
+  if(!product.imageUrl||failed) return <Swatch tone={product.imageColor}/>
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={product.imageUrl} alt="" className="inventory-thumb" loading="lazy" referrerPolicy="no-referrer" onError={()=>setFailed(true)}/>
 }
