@@ -8,6 +8,6 @@ const baseTabs:[string,string][]=[
 ]
 
 export function adminTabs(localController:boolean):[string,string][]{
-  // The machine controller only appears when the site runs locally (never on Vercel).
+  // The machine controller appears on localhost, or on Vercel when LOCAL_CONTROLLER=on.
   return localController?[...baseTabs,['/admin/local-controller','Local Controller']]:baseTabs
 }

@@ -9,16 +9,22 @@ export function isLoopbackHost(host:string|null|undefined){
 }
 
 /**
- * The Local Controller only exists when the site runs on this computer:
- * never on Vercel, never when LOCAL_CONTROLLER=off, production builds need LOCAL_CONTROLLER=on,
- * and the request must come to localhost/127.0.0.1.
+ * The Local Controller is shown on localhost during development, or anywhere
+ * (including Vercel) when LOCAL_CONTROLLER=on. LOCAL_CONTROLLER=off hides it everywhere.
+ * Production builds need LOCAL_CONTROLLER=on. Off Vercel, the request must also be to localhost.
  */
 export function localControllerEnabled(env:Record<string,string|undefined>=process.env,host?:string|null){
-  if(env.VERCEL||env.VERCEL_ENV) return false
   const flag=(env.LOCAL_CONTROLLER||'').toLowerCase()
   if(flag==='off'||flag==='0'||flag==='false') return false
-  const allowedByMode=flag==='on'||flag==='1'||flag==='true'||env.NODE_ENV!=='production'
+  const on=flag==='on'||flag==='1'||flag==='true'
+  if(env.VERCEL||env.VERCEL_ENV) return on
+  const allowedByMode=on||env.NODE_ENV!=='production'
   return allowedByMode&&isLoopbackHost(host)
+}
+
+/** True when this process is running on Vercel. The server proxy cannot reach 192.168.4.1 from there. */
+export function localControllerIsRemote(env:Record<string,string|undefined>=process.env){
+  return Boolean(env.VERCEL||env.VERCEL_ENV)
 }
 
 /** ESP32 address. Only private-network http addresses are accepted, so the proxy can't reach the internet. */

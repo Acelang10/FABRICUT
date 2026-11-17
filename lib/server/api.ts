@@ -176,7 +176,7 @@ export function createHandler(deps:Dependencies={}){
     const method=req.method
 
     if(route==='health'&&method==='GET') return json({status:'ok'})
-    // Local Controller API does not exist on Vercel / non-localhost: 404 before anything else.
+    // Local Controller API is 404 unless enabled (localhost in dev, or LOCAL_CONTROLLER=on).
     if(segments[0]==='local-controller'){
       const enabled=deps.localController?deps.localController(req):localControllerEnabled(process.env,req.headers.get('host')||new URL(req.url).host)
       if(!enabled) return json({error:'Not found'},404)

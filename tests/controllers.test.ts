@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {createHandler,type Dependencies} from '../lib/server/api'
 import {createMemoryStore} from '../lib/server/store'
-import {esp32BaseUrl,isLoopbackHost,localControllerEnabled,type FetchLike} from '../lib/server/localController'
+import {esp32BaseUrl,isLoopbackHost,localControllerEnabled,localControllerIsRemote,type FetchLike} from '../lib/server/localController'
 import {validateXCommand,isMotionCommand} from '../lib/controller/xcommands'
 import {adminTabs} from '../lib/adminNav'
 import {canMoveStage,garmentError,withGarmentDefaults,nextStage,previousStage} from '../lib/clothing'
@@ -41,7 +41,7 @@ const adminCookie = async (h: ReturnType<typeof createHandler>) => cookieFrom(aw
 const customerCookie = async (h: ReturnType<typeof createHandler>) => cookieFrom(await h(new Request('http://localhost/api/auth/session', {headers: {Authorization: 'Bearer valid.mock.signature'}})))
 
 // ---------- Local-only gating ----------
-test('local controller is enabled only on this computer, never on Vercel', () => {
+test('local controller is enabled on localhost, or on Vercel when LOCAL_CONTROLLER=on', () => {
   assert.equal(isLoopbackHost('localhost:3000'), true)
   assert.equal(isLoopbackHost('127.0.0.1:3000'), true)
   assert.equal(isLoopbackHost('[::1]:3000'), true)
@@ -51,9 +51,15 @@ test('local controller is enabled only on this computer, never on Vercel', () =>
   assert.equal(localControllerEnabled({NODE_ENV: 'development', VERCEL: '1'}, 'localhost:3000'), false)
   assert.equal(localControllerEnabled({NODE_ENV: 'production'}, 'localhost:3000'), false)
   assert.equal(localControllerEnabled({NODE_ENV: 'production', LOCAL_CONTROLLER: 'on'}, 'localhost:3000'), true)
-  assert.equal(localControllerEnabled({NODE_ENV: 'production', LOCAL_CONTROLLER: 'on', VERCEL_ENV: 'production'}, 'localhost'), false)
+  assert.equal(localControllerEnabled({NODE_ENV: 'production', LOCAL_CONTROLLER: 'on', VERCEL_ENV: 'production'}, 'localhost'), true)
+  assert.equal(localControllerEnabled({NODE_ENV: 'production', LOCAL_CONTROLLER: 'on', VERCEL: '1', VERCEL_ENV: 'production'}, 'fabricut-one.vercel.app'), true)
+  assert.equal(localControllerEnabled({NODE_ENV: 'production', VERCEL: '1', VERCEL_ENV: 'production'}, 'fabricut-one.vercel.app'), false)
+  assert.equal(localControllerEnabled({NODE_ENV: 'production', LOCAL_CONTROLLER: 'off', VERCEL: '1'}, 'fabricut-one.vercel.app'), false)
   assert.equal(localControllerEnabled({NODE_ENV: 'development', LOCAL_CONTROLLER: 'off'}, 'localhost:3000'), false)
   assert.equal(localControllerEnabled({NODE_ENV: 'development'}, 'fabricut-one.vercel.app'), false)
+  assert.equal(localControllerIsRemote({VERCEL: '1'}), true)
+  assert.equal(localControllerIsRemote({VERCEL_ENV: 'production'}), true)
+  assert.equal(localControllerIsRemote({}), false)
   assert.deepEqual(adminTabs(false).map(t => t[1]).includes('Local Controller'), false)
   assert.deepEqual(adminTabs(true).at(-1), ['/admin/local-controller', 'Local Controller'])
   assert.equal(adminTabs(false).some(t => t[1] === 'Production'), true)

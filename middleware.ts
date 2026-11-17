@@ -14,7 +14,7 @@ export async function middleware(req:NextRequest){
   const login=new URL('/login',req.url)
   login.searchParams.set('next',pathname)
 
-  // Machine controller pages are local-only: a real 404 on Vercel or any non-localhost host.
+  // Machine controller pages are hidden unless enabled (localhost in dev, or LOCAL_CONTROLLER=on).
   if((pathname.startsWith('/admin/local-controller')||pathname.startsWith('/admin/control'))&&!localControllerEnabled(process.env,req.headers.get('host'))){
     return new NextResponse('Not found',{status:404,headers:{'Content-Type':'text/plain'}})
   }

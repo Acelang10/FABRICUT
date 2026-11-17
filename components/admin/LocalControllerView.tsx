@@ -18,7 +18,7 @@ const time=()=>new Date().toLocaleTimeString('en-PH',{timeZone:'Asia/Manila',hou
  * USB serial (Web Serial, protocol v3) or the ESP32 Wi-Fi AP via the local server proxy.
  * Dry run is ON by default: motion commands are only logged. STOP always goes out. No laser control.
  */
-export default function LocalControllerView(){
+export default function LocalControllerView({remote=false}:{remote?:boolean}={}){
   const [transport,setTransport]=useState<Transport>('wifi')
   const [dryRun,setDryRun]=useState(true)
   const [connected,setConnected]=useState(false)
@@ -81,7 +81,7 @@ export default function LocalControllerView(){
     try{
       if(transport==='usb'){
         const serial=serialApi()
-        if(!serial) throw new Error('USB needs desktop Chrome or Edge on localhost.')
+        if(!serial) throw new Error('USB needs desktop Chrome or Edge in a secure context (HTTPS or localhost).')
         const port=await serial.requestPort()
         const client=new StepperSerialClient(
           p=>{setTelemetry(p as unknown as XTelemetry);setLinkError('')},
@@ -153,10 +153,16 @@ export default function LocalControllerView(){
       <div className="atelier-hello">
         <div>
           <h1>Local Controller</h1>
-          <p>X-axis test for the ESP32 cutter (X1 + X2 mirrored, Y stays off). Only shown when the site runs on this computer.</p>
+          <p>X-axis test for the ESP32 cutter (X1 + X2 mirrored, Y stays off).{remote?' The Wi-Fi proxy on this live site cannot reach the machine.':' Only shown on this computer unless LOCAL_CONTROLLER=on.'}</p>
         </div>
         <Link href="/admin/control" className="atelier-btn atelier-btn-ghost atelier-btn-sm">Laser pattern cutter (advanced) →</Link>
       </div>
+
+      {remote?(
+        <p className="lc-remote-note" role="note">
+          Live site can&apos;t reach the ESP32 directly. Connect to Fabricut-Controller Wi-Fi and open <a href="http://192.168.4.1">http://192.168.4.1</a>, or run locally.
+        </p>
+      ):null}
 
       <div className="lc-stop-bar">
         <button type="button" className="lc-stop" onClick={()=>void sendStop()} disabled={!connected}>STOP</button>
@@ -175,8 +181,10 @@ export default function LocalControllerView(){
           </div>
           <p className="atelier-muted">
             {transport==='wifi'
-              ?'Join this Mac to the “Fabricut-Controller” Wi-Fi first. The local server relays commands to the ESP32; only X-test commands are allowed.'
-              :usbSupported?'Plug the ESP32 into this Mac. Chrome/Edge will ask which port to use.':'USB needs desktop Chrome or Edge on localhost.'}
+              ?(remote
+                ?'The live site cannot reach 192.168.4.1. Connect to the “Fabricut-Controller” Wi-Fi and open the ESP32 page, or run this site locally. Only X-test commands are allowed.'
+                :'Join this Mac to the “Fabricut-Controller” Wi-Fi first. The local server relays commands to the ESP32; only X-test commands are allowed.')
+              :usbSupported?'Plug the ESP32 into this computer. Chrome/Edge will ask which port to use.':'USB needs desktop Chrome or Edge in a secure context (HTTPS or localhost).'}
           </p>
           <div className="atelier-dialog-actions lc-left">
             <button type="button" className="atelier-btn atelier-btn-b" disabled={busy||connected||(transport==='usb'&&!usbSupported)} onClick={()=>void connect()}>Connect</button>

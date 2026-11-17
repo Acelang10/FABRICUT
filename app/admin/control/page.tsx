@@ -7,7 +7,7 @@ import {localControllerEnabled} from '@/lib/server/localController'
 export const dynamic='force-dynamic'
 
 export default async function Page(){
-  // The previous laser pattern controller is local-only too.
+  // Hidden unless the Local Controller is enabled (localhost in dev, or LOCAL_CONTROLLER=on).
   if(!localControllerEnabled(process.env,(await headers()).get('host'))) notFound()
   return (
     <>

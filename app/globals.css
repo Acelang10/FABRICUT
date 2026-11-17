@@ -2392,6 +2392,8 @@ button.atelier-bell{
 .order-lines li{padding:6px 0;border-bottom:1px solid var(--l)}
 
 /* ---- Local controller ---- */
+.lc-remote-note{background:#fff8e8;border:1px solid #d9b35c;border-radius:14px;padding:12px 16px;margin:0 0 16px;font-size:14px;color:var(--i);line-height:1.45}
+.lc-remote-note a{color:var(--n);font-weight:700;text-decoration:underline}
 .lc-stop-bar{display:flex;align-items:center;gap:16px;background:#fff;border:2px solid #b52035;border-radius:18px;padding:12px 16px;margin-bottom:16px;position:sticky;top:8px;z-index:5}
 .lc-stop-bar p{margin:0;color:var(--i);font-size:13px}
 .lc-stop{background:#b52035;color:#fff;border:0;border-radius:16px;font-size:24px;font-weight:900;letter-spacing:.08em;padding:14px 34px;cursor:pointer;box-shadow:0 6px 0 #7a1222}
