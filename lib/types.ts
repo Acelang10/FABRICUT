@@ -35,17 +35,27 @@ export interface Product extends Meta {
 }
 export const SHOP_PRODUCT_STATUSES = ['draft','active'] as const
 export type ShopProductStatus = typeof SHOP_PRODUCT_STATUSES[number]
-/** One fabric (inventory item) used to make a sellable product, per unit sold. */
+/** One fabric (inventory item) used to make a sellable product, per unit sold. Legacy product field; new products do not set this. */
 export interface FabricUse {inventoryItemId:string;name:string;unit:string;quantity:number}
+/** A color the admin offers on a sellable product. hex is optional. */
+export interface ProductColor {name:string;hex?:string}
+/** In-stock, visible inventory fabric shown to customers when they order. */
+export interface ShopFabric {id:string;name:string;stock:number;unit:string;imageUrl:string}
+/** Fabric the customer picked on an order line. Not a usage amount, so it is not deducted from inventory. */
+export interface ChosenFabric {inventoryItemId:string;name:string;unit:string}
 /** A finished product customers can buy. Inventory (Product) stays admin-only raw material. */
 export interface ShopProduct extends Meta {
   name:string
   description:string
   price:number
   imageUrl:string
+  /** Kept for hide/publish. New products default to active. Existing draft docs stay hidden. */
   status:ShopProductStatus
   stock:number
+  /** Legacy "fabrics used" rows. Ignored by the new form; left untouched on existing docs. */
   fabrics:FabricUse[]
+  /** Colors customers may choose. Empty means the color step is skipped. */
+  colors:ProductColor[]
   /** Clothing type id from lib/clothing.ts (e.g. 'tshirt'). */
   clothingType:string
   /** Pattern/style ids the customer may choose from. */
@@ -58,7 +68,9 @@ export type OrderLineKind = 'product' | 'inventory'
 export interface OrderItem {
   productId:string;name:string;price:number;qty:number;kind?:OrderLineKind;fabrics?:FabricUse[]
   /** Garment choices for product lines. */
-  clothingType?:string;style?:string;size?:string
+  clothingType?:string;style?:string;size?:string;color?:string
+  /** Fabric the customer selected for this line. */
+  chosenFabric?:ChosenFabric
   /** Production stage for this line (Queued…Delivered); absent = Queued. */
   progress?:import('./clothing').ProductionStage;progressUpdatedAt?:string
 }

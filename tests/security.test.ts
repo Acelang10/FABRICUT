@@ -146,7 +146,7 @@ test('role guards: a customer cannot use admin product, order, report, or patter
   assert.equal((await handle(request('/api/reports', 'GET', undefined, {cookie}))).status, 403)
   assert.equal((await handle(request(`/api/orders/${created.id}`, 'PATCH', {status: 'Paid'}, {cookie}))).status, 404)
   const forSale = await sellable(store, created)
-  const placed = await handle(request('/api/orders', 'POST', {items: [{productId: forSale.id, qty: 1}]}, {cookie}))
+  const placed = await handle(request('/api/orders', 'POST', {items: [{productId: forSale.id, qty: 1, fabricId: created.id}]}, {cookie}))
   assert.equal((await handle(request('/api/orders', 'POST', {items: [{productId: created.id, qty: 1, kind: 'inventory'}]}, {cookie}))).status, 403)
   assert.equal(placed.status, 201)
   const order = await placed.json() as {id: string}
@@ -199,7 +199,7 @@ test('placing an order uses server prices, decrements stock, and rejects insuffi
   const patchItem = await sellable(store, patch)
   const cookie = await customerCookie(handle)
   const placed = await handle(request('/api/orders', 'POST', {
-    items: [{productId: fabricItem.id, qty: 2}, {productId: patchItem.id, qty: 1}],
+    items: [{productId: fabricItem.id, qty: 2, fabricId: fabric.id}, {productId: patchItem.id, qty: 1, fabricId: patch.id}],
     // Client-supplied price must be ignored if smuggled in the body later; schema strips unknown fields.
   }, {cookie}))
   assert.equal(placed.status, 201)
@@ -207,13 +207,16 @@ test('placing an order uses server prices, decrements stock, and rejects insuffi
   assert.equal(order.total, 2850 * 2 + 180)
   assert.equal(order.items[0].price, 2850)
   assert.equal(order.status, 'Pending')
-  assert.equal((await store.getProduct(fabric.id))?.stock, 16)
-  assert.equal((await store.getProduct(patch.id))?.stock, 1)
+  assert.equal((await store.getProduct(fabric.id))?.stock, 18)
+  assert.equal((await store.getShopProduct(fabricItem.id))?.stock, 16)
+  assert.equal((await store.getProduct(patch.id))?.stock, 2)
+  assert.equal((await store.getShopProduct(patchItem.id))?.stock, 1)
   const exhausted = await handle(request('/api/orders', 'POST', {
-    items: [{productId: patchItem.id, qty: 8}],
+    items: [{productId: patchItem.id, qty: 8, fabricId: patch.id}],
   }, {cookie}))
   assert.equal(exhausted.status, 409)
-  assert.equal((await store.getProduct(patch.id))?.stock, 1)
+  assert.equal((await store.getProduct(patch.id))?.stock, 2)
+  assert.equal((await store.getShopProduct(patchItem.id))?.stock, 1)
 })
 
 test('admin can add a walk-in order and update status, including stock restore on cancel', async () => {
@@ -239,9 +242,10 @@ test('admin can add a walk-in order and update status, including stock restore o
 
 test('customers only see their own orders', async () => {
   const {handle, store} = setup()
-  const product = await sellable(store, await store.createProduct(sampleProduct))
+  const fabric = await store.createProduct(sampleProduct)
+  const product = await sellable(store, fabric)
   const mine = await customerCookie(handle)
-  const placed = await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 1}]}, {cookie: mine}))
+  const placed = await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 1, fabricId: fabric.id}]}, {cookie: mine}))
   const order = await placed.json() as {id: string}
   const other = createHandler({
     store,

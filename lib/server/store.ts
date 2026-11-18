@@ -26,13 +26,13 @@ export function emptyProfile(id:string):UserProfile{
   return {id,displayName:'',phone:'',address:'',birthday:'',photoUrl:''}
 }
 
-export type ShopProductInput = Omit<ShopProduct,'id'|'createdAt'|'updatedAt'|keyof GarmentFields> & Partial<GarmentFields>
+export type ShopProductInput = Omit<ShopProduct,'id'|'createdAt'|'updatedAt'|keyof GarmentFields|'colors'|'fabrics'> & Partial<GarmentFields> & {colors?:ShopProduct['colors'];fabrics?:ShopProduct['fabrics']}
 
 export interface PlaceOrderInput {
   customerUid:string
   customerEmail:string
   customerName?:string
-  items:{productId:string;qty:number;kind?:OrderLineKind;size?:string;style?:string}[]
+  items:{productId:string;qty:number;kind?:OrderLineKind;size?:string;style?:string;color?:string;fabricId?:string}[]
   note?:string
   source:'customer'|'admin'
 }
@@ -79,13 +79,14 @@ export class StoreError extends Error {
 /** products = admin inventory (raw materials); shopProducts = sellable products. */
 interface DataFile {products:Product[];shopProducts:ShopProduct[];orders:ShopOrder[];notifications:ShopNotification[];profiles:UserProfile[]}
 
-export function mergeQty(items:{productId:string;qty:number;kind?:OrderLineKind;size?:string;style?:string}[]){
-  const map=new Map<string,{productId:string;qty:number;kind:OrderLineKind;size?:string;style?:string}>()
+type OrderRequestItem={productId:string;qty:number;kind?:OrderLineKind;size?:string;style?:string;color?:string;fabricId?:string}
+export function mergeQty(items:OrderRequestItem[]){
+  const map=new Map<string,{productId:string;qty:number;kind:OrderLineKind;size?:string;style?:string;color?:string;fabricId?:string}>()
   for(const item of items){
     const kind:OrderLineKind=item.kind==='inventory'?'inventory':'product'
-    // Same product in a different size/pattern is a separate line.
-    const key=`${kind}:${item.productId}:${item.size||''}:${item.style||''}`
-    const current=map.get(key)||{productId:item.productId,qty:0,kind,...(kind==='product'?{size:item.size,style:item.style}:{})}
+    // Same product in a different size, pattern, color or fabric is a separate line.
+    const key=`${kind}:${item.productId}:${item.size||''}:${item.style||''}:${item.color||''}:${item.fabricId||''}`
+    const current=map.get(key)||{productId:item.productId,qty:0,kind,...(kind==='product'?{size:item.size,style:item.style,color:item.color,fabricId:item.fabricId}:{})}
     current.qty+=item.qty
     map.set(key,current)
   }
@@ -94,17 +95,36 @@ export function mergeQty(items:{productId:string;qty:number;kind?:OrderLineKind;
 
 function cloneProduct(product:ShopProduct):ShopProduct{
   const p=withGarmentDefaults(product)
-  return {...p,fabrics:product.fabrics.map(f=>({...f})),patternStyles:[...p.patternStyles],sizes:[...p.sizes]}
+  return {
+    ...p,
+    fabrics:(product.fabrics||[]).map(f=>({...f})),
+    colors:(product.colors||[]).map(c=>({...c})),
+    patternStyles:[...p.patternStyles],
+    sizes:[...p.sizes],
+  }
 }
 
-/** Size/pattern for a product line: must be one the admin offered; missing values default to the first option. */
-export function garmentChoice(product:ShopProduct,size?:string,style?:string){
+/** Size, pattern and color for a product line: must be one the admin offered. Missing size/pattern default to the first option. */
+export function garmentChoice(product:ShopProduct,size?:string,style?:string,color?:string){
   const p=withGarmentDefaults(product)
+  const colors=product.colors||[]
   const chosenSize=size||p.sizes[0]
   const chosenStyle=style||p.patternStyles[0]
   if(!p.sizes.includes(chosenSize)) throw new StoreError(`Size ${chosenSize} is not available for ${product.name}`,400)
   if(!p.patternStyles.includes(chosenStyle)) throw new StoreError(`That pattern is not available for ${product.name}`,400)
-  return {clothingType:p.clothingType,size:chosenSize,style:chosenStyle}
+  if(colors.length){
+    if(!color) throw new StoreError('Choose a color',400)
+    if(!colors.some(c=>c.name===color)) throw new StoreError(`Color ${color} is not available for ${product.name}`,400)
+  }
+  return {clothingType:p.clothingType,size:chosenSize,style:chosenStyle,...(colors.length&&color?{color}:{})}
+}
+
+export function resolveChosenFabric(item:Product|null|undefined,required:boolean){
+  if(!required&&!item) return undefined
+  if(!item) throw new StoreError('Choose a fabric',400)
+  if(item.active===false) throw new StoreError(`${item.name} is not available`,400)
+  if(item.stock<=0) throw new StoreError(`${item.name} is out of stock`,409)
+  return {inventoryItemId:item.id,name:item.name,unit:item.unit}
 }
 
 /** Shared progress-move rule for both stores. Mutates and returns the line. */
@@ -120,7 +140,11 @@ export function moveLineProgress(order:ShopOrder,lineIndex:number,stage:Producti
 }
 
 function cloneOrder(order:ShopOrder):ShopOrder{
-  return {...order,items:order.items.map(i=>i.fabrics?{...i,fabrics:i.fabrics.map(f=>({...f}))}:{...i})}
+  return {...order,items:order.items.map(i=>({
+    ...i,
+    ...(i.fabrics?{fabrics:i.fabrics.map(f=>({...f}))}:{}),
+    ...(i.chosenFabric?{chosenFabric:{...i.chosenFabric}}:{}),
+  }))}
 }
 
 function countsTowardRevenue(status:OrderStatus){
@@ -166,7 +190,7 @@ function isoWeekKey(date:Date){
   return `${tmp.getUTCFullYear()}-W${String(week).padStart(2,'0')}`
 }
 
-/** Checks and deducts sellable-product stock and the inventory (fabrics) those lines consume. */
+/** Checks and deducts sellable-product stock, plus any legacy per-piece fabric amounts still stored on the line. Customer-chosen fabrics have no usage amount, so they are not deducted. */
 function reserve(data:DataFile,items:OrderItem[],errorMessage?:string){
   for(const [id,qty] of productUsage(items)){
     const product=data.shopProducts.find(p=>p.id===id)
@@ -188,15 +212,16 @@ function reserve(data:DataFile,items:OrderItem[],errorMessage?:string){
   }
 }
 
-export function orderLines(merged:ReturnType<typeof mergeQty>,find:{shop:(id:string)=>ShopProduct|null|undefined;inventory:(id:string)=>Product|null|undefined}){
+export function orderLines(merged:ReturnType<typeof mergeQty>,find:{shop:(id:string)=>ShopProduct|null|undefined;inventory:(id:string)=>Product|null|undefined},options:{requireFabric?:boolean}={}){
   const lines:OrderItem[]=[]
   for(const item of merged){
     if(item.kind==='product'){
       const product=find.shop(item.productId)
       if(!product||product.status!=='active') throw new StoreError('Product is not available',400)
       if(product.stock<item.qty) throw new StoreError(`Insufficient stock for ${product.name}`,409)
-      const choice=garmentChoice(product,item.size,item.style)
-      lines.push({productId:product.id,name:product.name,price:product.price,qty:item.qty,kind:'product',fabrics:product.fabrics.map(f=>({...f})),...choice,progress:'Queued'})
+      const choice=garmentChoice(product,item.size,item.style,item.color)
+      const chosenFabric=resolveChosenFabric(item.fabricId?find.inventory(item.fabricId):undefined,Boolean(options.requireFabric||item.fabricId))
+      lines.push({productId:product.id,name:product.name,price:product.price,qty:item.qty,kind:'product',...choice,...(chosenFabric?{chosenFabric}:{}),progress:'Queued'})
     }else{
       const product=find.inventory(item.productId)
       if(!product||!product.active) throw new StoreError('Product is not available',400)
@@ -211,7 +236,7 @@ function applyOrder(data:DataFile,input:PlaceOrderInput){
   const lines=orderLines(mergeQty(input.items),{
     shop:id=>data.shopProducts.find(p=>p.id===id),
     inventory:id=>data.products.find(p=>p.id===id),
-  })
+  },{requireFabric:input.source!=='admin'})
   reserve(data,lines)
   const now=new Date().toISOString()
   const total=lines.reduce((sum,line)=>sum+line.price*line.qty,0)
@@ -257,7 +282,10 @@ function implementation(load:()=>Promise<DataFile>, persist:(data:DataFile)=>Pro
   }
   return {
     listProducts(){return locked(async()=>(await load()).products.map(p=>({...p})))},
-    getProduct(id){return locked(async()=>(await load()).products.find(p=>p.id===id)||null)},
+    getProduct(id){return locked(async()=>{
+      const product=(await load()).products.find(p=>p.id===id)
+      return product?{...product}:null
+    })},
     createProduct(input){return locked(async()=>{
       const data=await load()
       const now=new Date().toISOString()
@@ -290,7 +318,7 @@ function implementation(load:()=>Promise<DataFile>, persist:(data:DataFile)=>Pro
     createShopProduct(input){return locked(async()=>{
       const data=await load()
       const now=new Date().toISOString()
-      const product:ShopProduct=withGarmentDefaults({...input,fabrics:input.fabrics.map(f=>({...f})),id:randomUUID(),createdAt:now,updatedAt:now})
+      const product:ShopProduct=withGarmentDefaults({...input,fabrics:(input.fabrics||[]).map(f=>({...f})),colors:(input.colors||[]).map(c=>({...c})),id:randomUUID(),createdAt:now,updatedAt:now})
       data.shopProducts.push(product)
       await persist(data)
       return cloneProduct(product)
@@ -301,6 +329,7 @@ function implementation(load:()=>Promise<DataFile>, persist:(data:DataFile)=>Pro
       if(!product) return null
       Object.assign(product,input,{updatedAt:new Date().toISOString()})
       if(input.fabrics) product.fabrics=input.fabrics.map(f=>({...f}))
+      if(input.colors) product.colors=input.colors.map(c=>({...c}))
       await persist(data)
       return cloneProduct(product)
     })},

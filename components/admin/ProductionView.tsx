@@ -87,9 +87,11 @@ export default function ProductionView(){
                       <div><dt>Type</dt><dd>{clothingLabel(item.clothingType)}</dd></div>
                       <div><dt>Pattern</dt><dd>{styleLabel(item.clothingType,item.style)||'—'}</dd></div>
                       <div><dt>Size</dt><dd className="prod-size">{item.size||'—'}</dd></div>
+                      {item.color?<div><dt>Color</dt><dd>{item.color}</dd></div>:null}
+                      {item.chosenFabric?<div className="prod-wide"><dt>Fabric</dt><dd>{item.chosenFabric.name}</dd></div>:null}
                     </>:<div><dt>Item</dt><dd>Inventory (raw material)</dd></div>}
                     <div><dt>Amount</dt><dd>{peso(item.price*item.qty)}</dd></div>
-                    {item.fabrics?.length?<div className="prod-wide"><dt>Fabrics</dt><dd>{item.fabrics.map(f=>`${f.name} ${round2(f.quantity*item.qty)} ${f.unit}`).join(', ')}</dd></div>:null}
+                    {!item.chosenFabric&&item.fabrics?.some(f=>f.quantity>0)?<div className="prod-wide"><dt>Fabrics</dt><dd>{item.fabrics.filter(f=>f.quantity>0).map(f=>`${f.name} ${round2(f.quantity*item.qty)} ${f.unit}`).join(', ')}</dd></div>:null}
                   </dl>
                   <ProgressPipeline stage={stage}/>
                   <div className="atelier-dialog-actions lc-left">

@@ -26,7 +26,7 @@ export default function CartDrawer({open,uid,lines,onClose,onChange}:{open:boole
     if(!lines.length) return
     setBusy(true);setError('')
     try{
-      await api('/orders','POST',{items:lines.map(line=>({productId:line.productId,qty:line.qty,kind:'product',...(line.size?{size:line.size}:{}),...(line.style?{style:line.style}:{})}))})
+      await api('/orders','POST',{items:lines.map(line=>({productId:line.productId,qty:line.qty,kind:'product',...(line.size?{size:line.size}:{}),...(line.style?{style:line.style}:{}),...(line.color?{color:line.color}:{}),...(line.fabricId?{fabricId:line.fabricId}:{})}))})
       writeCart(uid,[])
       window.dispatchEvent(new Event('fabricut-cart'))
       onChange()
@@ -53,7 +53,7 @@ export default function CartDrawer({open,uid,lines,onClose,onChange}:{open:boole
               :<span className="atelier-swatch kit"/>}
             <div>
               <strong>{line.name}</strong>
-              <span>{[line.size?`Size ${line.size}`:'',line.style?styleLabel(line.clothingType,line.style):''].filter(Boolean).join(' · ')}{line.size||line.style?' · ':''}{line.qty} × {peso(line.price)} each</span>
+              <span>{[line.fabricName,line.color,line.style?styleLabel(line.clothingType,line.style):'',line.size?`Size ${line.size}`:''].filter(Boolean).join(' · ')} · {line.qty} × {peso(line.price)} each</span>
             </div>
             <div className="atelier-qty">
               <button type="button" onClick={()=>setQty(lineKey(line),line.qty-1)} aria-label="Decrease">−</button>

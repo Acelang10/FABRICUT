@@ -1,4 +1,4 @@
-import type {FabricUse,OrderItem,Product} from './types'
+import type {FabricUse,OrderItem,Product,ShopFabric} from './types'
 
 export function round2(value:number){
   return Math.round(value*100)/100
@@ -53,3 +53,34 @@ export function productUsage(items:OrderItem[]){
 export function describeFabrics(fabrics:FabricUse[]){
   return fabrics.map(f=>`${f.name} (${round2(f.quantity)} ${f.unit})`).join(', ')
 }
+
+/** Inventory fabrics a customer may pick when ordering: in stock and not hidden. */
+export function shopFabricOptions(inventory:Product[]){
+  return inventory
+    .filter(item=>item.active!==false&&item.stock>0)
+    .slice()
+    .sort((a,b)=>a.name.localeCompare(b.name))
+}
+
+/** Public fields only — no leftover price, category or description. */
+export function publicFabric(item:Product):ShopFabric{
+  return {id:item.id,name:item.name,stock:round2(item.stock),unit:item.unit,imageUrl:item.imageUrl||''}
+}
+
+export function shortDescription(text:string,max=140){
+  const value=text.trim().replace(/\s+/g,' ')
+  if(value.length<=max) return value
+  return `${value.slice(0,max-1).trimEnd()}…`
+}
+
+/** Human-readable fabric, color, pattern and size for an order line. */
+export function lineChoiceLabel(item:Pick<OrderItem,'chosenFabric'|'color'|'clothingType'|'style'|'size'>,styleName?:string){
+  const parts=[
+    item.chosenFabric?.name,
+    item.color,
+    styleName||'',
+    item.size?`Size ${item.size}`:'',
+  ].filter(Boolean)
+  return parts.join(' · ')
+}
+

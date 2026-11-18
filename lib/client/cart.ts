@@ -1,8 +1,8 @@
 /** Cart lines always reference sellable products (shop-products), never raw inventory. */
-export interface CartLine {productId:string;kind:'product';name:string;price:number;imageUrl:string;qty:number;clothingType?:string;size?:string;style?:string}
+export interface CartLine {productId:string;kind:'product';name:string;price:number;imageUrl:string;qty:number;clothingType?:string;size?:string;style?:string;color?:string;fabricId?:string;fabricName?:string}
 
-/** Same product in a different size or pattern is its own cart line. */
-export function lineKey(line:Pick<CartLine,'productId'|'size'|'style'>){return `${line.productId}|${line.size||''}|${line.style||''}`}
+/** Same product in a different size, pattern, color or fabric is its own cart line. */
+export function lineKey(line:Pick<CartLine,'productId'|'size'|'style'|'color'|'fabricId'>){return `${line.productId}|${line.size||''}|${line.style||''}|${line.color||''}|${line.fabricId||''}`}
 
 /** Add one unit of a product/size/pattern to the cart lines. */
 export function addToCart(lines:CartLine[],line:Omit<CartLine,'qty'>,qty=1):CartLine[]{

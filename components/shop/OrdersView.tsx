@@ -2,6 +2,7 @@
 import {useEffect,useState} from 'react'
 import {api} from '@/lib/client/api'
 import {peso} from '@/lib/format'
+import {lineChoiceLabel} from '@/lib/fabrics'
 import type {ShopOrder} from '@/lib/types'
 import {styleLabel} from '@/lib/clothing'
 import ProgressPipeline from '../ProgressPipeline'
@@ -56,7 +57,7 @@ export default function CustomerOrdersView(){
           </div>
           <ul className="order-lines">{order.items.map((item,index)=>(
             <li key={index}>
-              <div>{item.name} × {item.qty} · {peso(item.price*item.qty)}{item.size||item.style?<span className="atelier-muted"> · {[item.size?`Size ${item.size}`:'',item.style?styleLabel(item.clothingType,item.style):''].filter(Boolean).join(' · ')}</span>:null}</div>
+              <div>{item.name} × {item.qty} · {peso(item.price*item.qty)}{lineChoiceLabel(item,styleLabel(item.clothingType,item.style))?<span className="atelier-muted"> · {lineChoiceLabel(item,styleLabel(item.clothingType,item.style))}</span>:null}</div>
               {item.kind==='product'&&order.status!=='Cancelled'?<ProgressPipeline stage={item.progress||'Queued'} compact/>:null}
             </li>
           ))}</ul>

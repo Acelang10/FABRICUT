@@ -30,9 +30,11 @@ export const orderItemRequestSchema = z.object({
   qty: z.number().int().min(1).max(100000),
   // 'product' = sellable product (customers); 'inventory' = raw inventory item (admin walk-in only).
   kind: z.enum(['product','inventory']).default('product'),
-  // Garment choices for products; checked against the product's offered sizes/patterns on the server.
+  // Garment choices for products; checked against the product's offered sizes/patterns/colors on the server.
   size: z.string().trim().min(1).max(10).optional(),
   style: z.string().trim().min(1).max(40).optional(),
+  color: z.string().trim().min(1).max(40).optional(),
+  fabricId: z.string().trim().min(1).max(80).optional(),
 }).strict()
 
 export const lineProgressSchema = z.object({progress: z.enum(PRODUCTION_STAGES)}).strict()
@@ -41,6 +43,19 @@ export const fabricUseRequestSchema = z.object({
   inventoryItemId: z.string().trim().min(1).max(80),
   quantity: z.number().finite().gt(0).max(100_000),
 }).strict()
+const productColorSchema = z.object({
+  name: z.string().trim().min(1).max(40),
+  hex: z.string().trim().regex(/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/, 'Color must be a #hex value').optional().or(z.literal('')),
+}).strict().transform(({name, hex}) => hex ? {name, hex} : {name})
+const productColorsSchema = z.array(productColorSchema).max(20).superRefine((colors, ctx) => {
+  const seen = new Set<string>()
+  for (const [index, color] of colors.entries()) {
+    const key = color.name.toLowerCase()
+    if (seen.has(key)) ctx.addIssue({code: 'custom', message: 'Each color can only be listed once', path: [index, 'name']})
+    seen.add(key)
+  }
+})
+
 const shopProductShape = {
   name: text,
   description: z.string().trim().max(2000),
@@ -49,6 +64,7 @@ const shopProductShape = {
   status: z.enum(SHOP_PRODUCT_STATUSES),
   stock: z.number().int().min(0).max(1_000_000),
   fabrics: z.array(fabricUseRequestSchema).max(20),
+  colors: productColorsSchema,
   clothingType: z.string().trim().min(1).max(40),
   patternStyles: z.array(z.string().trim().min(1).max(40)).max(10),
   sizes: z.array(z.string().trim().min(1).max(10)).max(10),
@@ -57,13 +73,14 @@ export const shopProductInputSchema = z.object({
   ...shopProductShape,
   description: shopProductShape.description.default(''),
   imageUrl: imageUrl.default(''),
-  status: shopProductShape.status.default('draft'),
+  status: shopProductShape.status.default('active'),
   fabrics: shopProductShape.fabrics.default([]),
+  colors: shopProductShape.colors.default([]),
   clothingType: shopProductShape.clothingType.optional(),
   patternStyles: shopProductShape.patternStyles.optional(),
   sizes: shopProductShape.sizes.optional(),
 }).strict()
-// No defaults on update, so a partial PUT never resets status/fabrics.
+// No defaults on update, so a partial PUT never resets status/fabrics/colors.
 export const shopProductUpdateSchema = z.object(shopProductShape).partial().strict()
   .refine(data => Object.keys(data).length > 0, {message: 'No fields to update'})
 

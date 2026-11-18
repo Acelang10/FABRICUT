@@ -8,7 +8,7 @@ import {lineProgressSchema,markNotificationsReadSchema,placeOrderSchema,productI
 import {StoreError,buildReports,shopStore,type ShopStore} from './store'
 import {announceLineProgress,announceAdminOrderUpdate,announceLowStock,announceOrderCancelledByCustomer,announceOrderPlaced,lowStockThreshold} from './notifications'
 import type {AppUser,FabricUse} from '../types'
-import {round2} from '../fabrics'
+import {publicFabric,round2,shopFabricOptions} from '../fabrics'
 import {garmentError,withGarmentDefaults} from '../clothing'
 import {esp32Request,localControllerEnabled,type FetchLike} from './localController'
 import {cloudinaryClient,cloudinaryCredentials,deliveryUrl,signUpload,uploadProblem,type CloudinaryClient,type CloudinaryCredentials} from './cloudinary'
@@ -274,6 +274,11 @@ export function createHandler(deps:Dependencies={}){
       if(segments[0]==='patterns'&&!segments[1]&&method==='POST'){
         if(user.role!=='admin') return json({error:'Admin access required'},403)
         return upload(req,deps.uploadsDirectory)
+      }
+
+      // In-stock, visible inventory fabrics for the customer order modal (name, photo, remaining stock only).
+      if(route==='fabrics'&&method==='GET'){
+        return json(shopFabricOptions(await store().listProducts()).map(publicFabric))
       }
 
       // Inventory (raw fabrics/materials) is admin-only; customers buy shop-products instead.

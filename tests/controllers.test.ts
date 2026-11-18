@@ -134,6 +134,7 @@ test('admin product needs a valid type/pattern/size set; orders must use offered
   const {handle, store} = setup()
   const admin = await adminCookie(handle)
   const customer = await customerCookie(handle)
+  const fabric = await store.createProduct({name: 'Cotton', stock: 20, unit: 'yd', active: true})
   const base = {name: 'Polo', price: 800, stock: 10, status: 'active', clothingType: 'polo', patternStyles: ['classic', 'pocket'], sizes: ['M', 'L']}
   assert.equal((await handle(request('/api/shop-products', 'POST', {...base, patternStyles: ['vneck']}, admin))).status, 400)
   assert.equal((await handle(request('/api/shop-products', 'POST', {...base, sizes: []}, admin))).status, 400)
@@ -143,12 +144,12 @@ test('admin product needs a valid type/pattern/size set; orders must use offered
   assert.equal((await handle(request(`/api/shop-products/${product.id}`, 'PUT', {clothingType: 'dress'}, admin))).status, 400)
   assert.equal((await handle(request(`/api/shop-products/${product.id}`, 'PUT', {sizes: ['S', 'M', 'L']}, admin))).status, 200)
 
-  assert.equal((await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 1, size: 'XXL', style: 'classic'}]}, customer))).status, 400)
-  assert.equal((await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 1, size: 'M', style: 'vneck'}]}, customer))).status, 400)
+  assert.equal((await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 1, size: 'XXL', style: 'classic', fabricId: fabric.id}]}, customer))).status, 400)
+  assert.equal((await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 1, size: 'M', style: 'vneck', fabricId: fabric.id}]}, customer))).status, 400)
   const placed = await handle(request('/api/orders', 'POST', {items: [
-    {productId: product.id, qty: 1, size: 'M', style: 'classic'},
-    {productId: product.id, qty: 2, size: 'L', style: 'pocket'},
-    {productId: product.id, qty: 1, size: 'M', style: 'classic'},
+    {productId: product.id, qty: 1, size: 'M', style: 'classic', fabricId: fabric.id},
+    {productId: product.id, qty: 2, size: 'L', style: 'pocket', fabricId: fabric.id},
+    {productId: product.id, qty: 1, size: 'M', style: 'classic', fabricId: fabric.id},
   ]}, customer))
   assert.equal(placed.status, 201)
   const order = await placed.json() as ShopOrder
@@ -164,7 +165,9 @@ test('cart keeps different sizes/patterns of one product as separate lines', () 
   lines = addToCart(lines, {...line, size: 'L', style: 'crew'})
   lines = addToCart(lines, {...line, size: 'M', style: 'vneck'})
   assert.equal(lines.length, 3)
-  assert.equal(lines.find(l => lineKey(l) === 'p1|M|crew')?.qty, 2)
+  assert.equal(lines.find(l => lineKey(l) === 'p1|M|crew||')?.qty, 2)
+  lines = addToCart(lines, {...line, size: 'M', style: 'crew', color: 'Navy', fabricId: 'f1'})
+  assert.equal(lines.length, 4)
 })
 
 // ---------- Production progress ----------
@@ -178,11 +181,12 @@ test('production stages move one step at a time', () => {
 })
 
 test('admin advances an order line, customer is notified, and invalid moves are refused', async () => {
-  const {handle} = setup()
+  const {handle, store} = setup()
   const admin = await adminCookie(handle)
   const customer = await customerCookie(handle)
+  const fabric = await store.createProduct({name: 'Cotton', stock: 20, unit: 'yd', active: true})
   const product = await (await handle(request('/api/shop-products', 'POST', {name: 'Tee', price: 300, stock: 5, status: 'active', clothingType: 'tshirt', patternStyles: ['crew'], sizes: ['M']}, admin))).json() as ShopProduct
-  const order = await (await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 1, size: 'M', style: 'crew'}]}, customer))).json() as ShopOrder
+  const order = await (await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 1, size: 'M', style: 'crew', fabricId: fabric.id}]}, customer))).json() as ShopOrder
   const url = `/api/orders/${order.id}/lines/0`
   assert.equal((await handle(request(url, 'PATCH', {progress: 'Cutting'}, customer))).status, 403)
   assert.equal((await handle(request(url, 'PATCH', {progress: 'Sewing'}, admin))).status, 409)

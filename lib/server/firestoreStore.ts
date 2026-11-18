@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto'
 import type {DocumentData,Firestore} from 'firebase-admin/firestore'
 import type {DocumentReference,DocumentSnapshot,Transaction} from 'firebase-admin/firestore'
-import type {FabricUse,OrderItem,OrderStatus,Product,ShopNotification,ShopOrder,ShopProduct,UserProfile} from '../types'
+import type {ChosenFabric,FabricUse,OrderItem,OrderStatus,Product,ProductColor,ShopNotification,ShopOrder,ShopProduct,UserProfile} from '../types'
 import {StoreError,emptyProfile,mergeQty,moveLineProgress,orderLines,type NotificationInput,type PlaceOrderInput,type ProductInput,type ShopProductInput,type ShopStore} from './store'
 import {inventoryUsage,productUsage,round2} from '../fabrics'
 import {PRODUCTION_STAGES,withGarmentDefaults,type ProductionStage} from '../clothing'
@@ -41,6 +41,22 @@ function fabricsFrom(value:unknown):FabricUse[]{
 
 function stringList(value:unknown){return Array.isArray(value)?value.map(String):[]}
 
+function colorsFrom(value:unknown):ProductColor[]{
+  if(!Array.isArray(value)) return []
+  const colors:ProductColor[]=[]
+  const seen=new Set<string>()
+  for(const raw of value){
+    const name=typeof raw==='string'?raw.trim():String((raw as ProductColor)?.name||'').trim()
+    if(!name) continue
+    const key=name.toLowerCase()
+    if(seen.has(key)) continue
+    seen.add(key)
+    const hex=typeof raw==='string'?'':String((raw as ProductColor)?.hex||'').trim()
+    colors.push(hex?{name,hex}:{name})
+  }
+  return colors
+}
+
 function shopProductFrom(id:string,data:DocumentData):ShopProduct{
   return withGarmentDefaults({
     clothingType:String(data.clothingType||''),
@@ -54,14 +70,28 @@ function shopProductFrom(id:string,data:DocumentData):ShopProduct{
     status:data.status==='active'?'active':'draft',
     stock:Number(data.stock||0),
     fabrics:fabricsFrom(data.fabrics),
+    colors:colorsFrom(data.colors),
     createdAt:String(data.createdAt||''),
     updatedAt:String(data.updatedAt||''),
   })
 }
 
+function colorFields(colors:ProductColor[]|undefined){
+  return (colors||[]).map(c=>c.hex?{name:c.name,hex:c.hex}:{name:c.name})
+}
+
 function shopProductFields(input:ShopProductInput|ShopProduct){
-  const {name,description,price,imageUrl,status,stock,fabrics,clothingType,patternStyles,sizes}=withGarmentDefaults(input)
-  return {name,description,price,imageUrl,status,stock,clothingType,patternStyles:[...patternStyles],sizes:[...sizes],fabrics:fabrics.map(f=>({inventoryItemId:f.inventoryItemId,name:f.name,unit:f.unit,quantity:f.quantity}))}
+  const {name,description,price,imageUrl,status,stock,fabrics,colors,clothingType,patternStyles,sizes}=withGarmentDefaults(input)
+  return {name,description,price,imageUrl,status,stock,clothingType,patternStyles:[...patternStyles],sizes:[...sizes],fabrics:(fabrics||[]).map(f=>({inventoryItemId:f.inventoryItemId,name:f.name,unit:f.unit,quantity:f.quantity})),colors:colorFields(colors)}
+}
+
+function chosenFabricFrom(value:unknown):ChosenFabric|undefined{
+  if(!value||typeof value!=='object') return undefined
+  const raw=value as Partial<ChosenFabric>
+  const inventoryItemId=String(raw.inventoryItemId||'')
+  const name=String(raw.name||'')
+  if(!inventoryItemId||!name) return undefined
+  return {inventoryItemId,name,unit:String(raw.unit||'')}
 }
 
 function lineFrom(item:OrderItem):OrderItem{
@@ -76,6 +106,9 @@ function lineFrom(item:OrderItem):OrderItem{
     if(item.clothingType) line.clothingType=String(item.clothingType)
     if(item.style) line.style=String(item.style)
     if(item.size) line.size=String(item.size)
+    if(item.color) line.color=String(item.color)
+    const chosen=chosenFabricFrom(item.chosenFabric)
+    if(chosen) line.chosenFabric=chosen
   }
   else if(item.kind==='inventory') line.kind='inventory'
   if(item.progress&&(PRODUCTION_STAGES as readonly string[]).includes(item.progress)) line.progress=item.progress as ProductionStage
@@ -111,7 +144,8 @@ function linePayload(items:OrderItem[]){
     const line:Record<string,unknown>={productId:item.productId,name:item.name,price:item.price,qty:item.qty}
     if(item.kind) line.kind=item.kind
     if(item.kind==='product') line.fabrics=(item.fabrics||[]).map(f=>({inventoryItemId:f.inventoryItemId,name:f.name,unit:f.unit,quantity:f.quantity}))
-    for(const key of ['clothingType','style','size','progress','progressUpdatedAt'] as const){ if(item[key]) line[key]=item[key] }
+    for(const key of ['clothingType','style','size','color','progress','progressUpdatedAt'] as const){ if(item[key]) line[key]=item[key] }
+    if(item.chosenFabric) line.chosenFabric={inventoryItemId:item.chosenFabric.inventoryItemId,name:item.chosenFabric.name,unit:item.chosenFabric.unit}
     return line
   })
 }
@@ -273,7 +307,10 @@ export function createFirestoreStore(db:Firestore=adminFirestore()):ShopStore{
       return db.runTransaction(async tx=>{
         const merged=mergeQty(input.items)
         const shopIds=[...new Set(merged.filter(i=>i.kind==='product').map(i=>i.productId))]
-        const inventoryIds=[...new Set(merged.filter(i=>i.kind==='inventory').map(i=>i.productId))]
+        const inventoryIds=[...new Set([
+          ...merged.filter(i=>i.kind==='inventory').map(i=>i.productId),
+          ...merged.filter(i=>i.kind==='product'&&i.fabricId).map(i=>i.fabricId!),
+        ])]
         const refs=[...shopIds.map(id=>shopProducts.doc(id)),...inventoryIds.map(id=>products.doc(id))]
         const snaps=refs.length?await tx.getAll(...refs):[]
         const shopMap=new Map<string,ShopProduct>()
@@ -283,7 +320,7 @@ export function createFirestoreStore(db:Firestore=adminFirestore()):ShopStore{
           if(index<shopIds.length) shopMap.set(snap.id,shopProductFrom(snap.id,snap.data()!))
           else inventoryMap.set(snap.id,productFrom(snap.id,snap.data()!))
         })
-        const lines=orderLines(merged,{shop:id=>shopMap.get(id),inventory:id=>inventoryMap.get(id)})
+        const lines=orderLines(merged,{shop:id=>shopMap.get(id),inventory:id=>inventoryMap.get(id)},{requireFabric:input.source!=='admin'})
         await adjustStock(tx,lines,-1)
         const now=new Date().toISOString()
         const total=lines.reduce((sum,line)=>sum+line.price*line.qty,0)

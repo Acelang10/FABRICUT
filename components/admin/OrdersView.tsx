@@ -2,6 +2,8 @@
 import {useEffect,useMemo,useState} from 'react'
 import {api} from '@/lib/client/api'
 import {peso} from '@/lib/format'
+import {lineChoiceLabel} from '@/lib/fabrics'
+import {styleLabel} from '@/lib/clothing'
 import {ORDER_STATUSES,type OrderStatus,type Product,type ShopOrder,type ShopProduct} from '@/lib/types'
 
 const filters:('All'|OrderStatus)[]=['All',...ORDER_STATUSES]
@@ -82,7 +84,11 @@ export default function OrdersView(){
             <span className={`atelier-tag ${order.status==='Cutting'||order.status==='To cut'?'cut':''}`}>{order.status}</span>
           </div>
           <p className="atelier-muted">{order.customerEmail} · {order.source} · {new Date(order.createdAt||Date.now()).toLocaleString('en-PH',{timeZone:'Asia/Manila'})}</p>
-          <ul>{order.items.map(item=><li key={item.productId+item.name}>{item.name} × {item.qty} · {peso(item.price*item.qty)}{item.fabrics?.length?<span className="atelier-muted"> · uses {item.fabrics.map(f=>`${f.name} ${Math.round(f.quantity*item.qty*100)/100} ${f.unit}`).join(', ')}</span>:null}</li>)}</ul>
+          <ul>{order.items.map((item,index)=>{
+            const choices=lineChoiceLabel(item,styleLabel(item.clothingType,item.style))
+            const legacy=item.fabrics?.filter(f=>f.quantity>0).map(f=>`${f.name} ${Math.round(f.quantity*item.qty*100)/100} ${f.unit}`).join(', ')
+            return <li key={item.productId+item.name+index}>{item.name} × {item.qty} · {peso(item.price*item.qty)}{choices?<span className="atelier-muted"> · {choices}</span>:null}{legacy&&!item.chosenFabric?<span className="atelier-muted"> · uses {legacy}</span>:null}</li>
+          })}</ul>
           <p className="atelier-px">Total {peso(order.total)}</p>
           {order.note?<p className="atelier-muted">{order.note}</p>:null}
           <label className="atelier-status-label">Update status

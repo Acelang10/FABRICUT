@@ -2458,3 +2458,27 @@ a.atelier-user-item{display:block;text-decoration:none;box-sizing:border-box}
 .profile-card label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:var(--m)}
 .profile-card input,.profile-card textarea{border:1px solid var(--l);border-radius:12px;padding:10px 12px;font-weight:600;color:var(--i);font:inherit}
 .profile-card input[readonly]{background:var(--s)}
+
+
+.modal-dialog-wide{width:min(640px,94vw)}
+.atelier-card-clickable{cursor:pointer}
+.atelier-color-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:end}
+.atelier-color-swatch input[type=color]{width:48px;height:40px;padding:2px;border-radius:10px;cursor:pointer}
+.order-modal{display:flex;flex-direction:column;gap:12px}
+.order-modal-desc{margin:0;white-space:pre-wrap;line-height:1.5;color:var(--i)}
+.fabric-picks,.color-picks{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+.fabric-pick,.color-pick{display:flex;align-items:center;gap:10px;text-align:left;border:1px solid var(--l);background:#fff;border-radius:14px;padding:8px 10px;cursor:pointer;color:var(--i)}
+.fabric-pick.on,.color-pick.on{border-color:var(--b);box-shadow:0 0 0 2px color-mix(in srgb,var(--b) 25%,transparent)}
+.fabric-pick span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.fabric-pick b{font-size:13px;color:var(--n)}
+.fabric-pick small{font-size:11px;color:var(--m)}
+.fabric-thumb{width:44px;height:44px;border-radius:10px;object-fit:cover;background:var(--s);flex:none}
+.fabric-thumb-empty{display:block;border:1px dashed var(--l)}
+.color-picks{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}
+.color-dot{width:18px;height:18px;border-radius:99px;border:1px solid #0002;flex:none}
+@media(max-width:600px){
+  .atelier-color-row{grid-template-columns:minmax(0,1fr) auto}
+  .atelier-color-row button{grid-column:1/-1;justify-self:start}
+  .fabric-picks,.color-picks{grid-template-columns:1fr}
+  .modal-dialog,.modal-dialog-wide{width:min(100%,96vw);max-height:92vh}
+}

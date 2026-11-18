@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {createHandler} from '../lib/server/api'
 import {createMemoryStore} from '../lib/server/store'
-import {availableFabricOptions,inventoryUsage} from '../lib/fabrics'
+import {availableFabricOptions,inventoryUsage,publicFabric,shopFabricOptions} from '../lib/fabrics'
 import {productInputSchema,shopProductInputSchema,shopProductUpdateSchema} from '../lib/server/shop-schema'
 import type {Identity} from '../lib/server/identity'
 import type {Product,ShopNotification,ShopOrder,ShopProduct} from '../lib/types'
@@ -83,18 +83,36 @@ test('fabric dropdown lists only inventory with stock left, sorted, keeping alre
   assert.deepEqual(availableFabricOptions(list, ['d']).map(i => i.id), ['c', 'd', 'a'])
 })
 
+test('customer fabric options hide out-of-stock and hidden inventory', () => {
+  const list = [
+    inv('a', 'Wool', 3),
+    inv('b', 'Linen', 0),
+    {...inv('c', 'Cotton', 2), active: false},
+    inv('d', 'Silk', 1),
+  ]
+  assert.deepEqual(shopFabricOptions(list).map(i => i.id), ['d', 'a'])
+  assert.deepEqual(publicFabric(list[0]), {id: 'a', name: 'Wool', stock: 3, unit: 'yd', imageUrl: ''})
+})
+
 test('inventory usage multiplies fabric per unit by quantity and counts legacy inventory lines', () => {
   const usage = inventoryUsage([
     {productId: 'p1', name: 'Barong', price: 1, qty: 2, kind: 'product', fabrics: [{inventoryItemId: 'f1', name: 'Piña', unit: 'yd', quantity: 1.5}]},
     {productId: 'f1', name: 'Piña', price: 1, qty: 1},
   ])
   assert.equal(usage.get('f1'), 4)
+  // A customer-chosen fabric without a usage amount is not deducted.
+  const chosen = inventoryUsage([
+    {productId: 'p1', name: 'Barong', price: 1, qty: 2, kind: 'product', chosenFabric: {inventoryItemId: 'f1', name: 'Piña', unit: 'yd'}},
+  ])
+  assert.equal(chosen.size, 0)
 })
 
 test('product validation rejects bad input and partial updates keep other fields', () => {
   const ok = shopProductInputSchema.parse({name: 'Barong', price: 1200, stock: 3})
-  assert.equal(ok.status, 'draft')
+  assert.equal(ok.status, 'active')
   assert.deepEqual(ok.fabrics, [])
+  assert.deepEqual(ok.colors, [])
+  assert.equal(ok.description, '')
   for (const bad of [
     {name: '', price: 1, stock: 1},
     {name: 'X', price: 0, stock: 1},
@@ -103,102 +121,116 @@ test('product validation rejects bad input and partial updates keep other fields
     {name: 'X', price: 1, stock: 1, imageUrl: 'javascript:alert(1)'},
     {name: 'X', price: 1, stock: 1, imageUrl: '//evil.example/x.png'},
     {name: 'X', price: 1, stock: 1, fabrics: [{inventoryItemId: 'a', quantity: 0}]},
+    {name: 'X', price: 1, stock: 1, colors: [{name: 'Navy', hex: 'blue'}]},
+    {name: 'X', price: 1, stock: 1, colors: [{name: 'Navy'}, {name: 'navy'}]},
     {name: 'X', price: 1, stock: 1, unknown: true},
   ]) assert.equal(shopProductInputSchema.safeParse(bad).success, false, JSON.stringify(bad))
   assert.equal(shopProductInputSchema.safeParse({name: 'X', price: 1, stock: 1, imageUrl: 'https://example.com/a.jpg'}).success, true)
+  assert.deepEqual(shopProductInputSchema.parse({name: 'X', price: 1, stock: 1, colors: [{name: 'Navy', hex: '#123abc'}]}).colors, [{name: 'Navy', hex: '#123abc'}])
   const patch = shopProductUpdateSchema.parse({price: 99})
   assert.deepEqual(patch, {price: 99})
   assert.equal(shopProductUpdateSchema.safeParse({}).success, false)
 })
 
 test('only admins can create, update, or delete products; customers see active products only', async () => {
-  const {handle, store} = setup()
-  const fabric = await store.createProduct(inventoryItem())
+  const {handle} = setup()
   const admin = await adminCookie(handle)
   const customer = await customerCookie(handle)
-  const body = {name: 'Navy barong', price: 3200, stock: 4, status: 'active', fabrics: [{inventoryItemId: fabric.id, quantity: 2.5}]}
+  const body = {name: 'Navy barong', description: 'A formal shirt', price: 3200, stock: 4, colors: [{name: 'Navy', hex: '#1f3a5f'}]}
 
   assert.equal((await handle(request('/api/shop-products', 'POST', body))).status, 401)
   assert.equal((await handle(request('/api/shop-products', 'POST', body, customer))).status, 403)
   const created = await handle(request('/api/shop-products', 'POST', body, admin))
   assert.equal(created.status, 201)
   const product = await created.json() as ShopProduct
-  assert.deepEqual(product.fabrics, [{inventoryItemId: fabric.id, name: 'Cotton twill, navy', unit: 'yd', quantity: 2.5}])
+  assert.equal(product.status, 'active')
+  assert.deepEqual(product.fabrics, [])
+  assert.deepEqual(product.colors, [{name: 'Navy', hex: '#1f3a5f'}])
+  assert.equal(product.description, 'A formal shirt')
 
-  const draft = await (await handle(request('/api/shop-products', 'POST', {name: 'Draft', price: 10, stock: 1}, admin))).json() as ShopProduct
-  assert.equal(draft.status, 'draft')
+  const hidden = await (await handle(request('/api/shop-products', 'POST', {name: 'Hidden', price: 10, stock: 1, status: 'draft'}, admin))).json() as ShopProduct
+  assert.equal(hidden.status, 'draft')
 
   assert.equal((await handle(request(`/api/shop-products/${product.id}`, 'PUT', {price: 1}, customer))).status, 403)
   assert.equal((await handle(request(`/api/shop-products/${product.id}`, 'DELETE', undefined, customer))).status, 403)
 
   const visible = await (await handle(request('/api/shop-products', 'GET', undefined, customer))).json() as ShopProduct[]
   assert.deepEqual(visible.map(p => p.id), [product.id])
-  assert.equal(visible[0].fabrics[0].name, 'Cotton twill, navy')
-  assert.equal((await handle(request(`/api/shop-products/${draft.id}`, 'GET', undefined, customer))).status, 404)
+  assert.equal((await handle(request(`/api/shop-products/${hidden.id}`, 'GET', undefined, customer))).status, 404)
   const all = await (await handle(request('/api/shop-products', 'GET', undefined, admin))).json() as ShopProduct[]
   assert.equal(all.length, 2)
 
   const updated = await (await handle(request(`/api/shop-products/${product.id}`, 'PUT', {price: 3000}, admin))).json() as ShopProduct
   assert.equal(updated.price, 3000)
   assert.equal(updated.status, 'active')
-  assert.equal(updated.fabrics.length, 1)
-  assert.equal((await handle(request(`/api/shop-products/${draft.id}`, 'DELETE', undefined, admin))).status, 200)
+  assert.equal(updated.description, 'A formal shirt')
+  assert.equal(updated.colors.length, 1)
+  assert.equal((await handle(request(`/api/shop-products/${hidden.id}`, 'DELETE', undefined, admin))).status, 200)
 })
 
-test('fabric selections must be existing, in-stock inventory and not repeated', async () => {
+test('customers can list in-stock visible fabrics, but not manage inventory', async () => {
   const {handle, store} = setup()
-  const fabric = await store.createProduct(inventoryItem())
-  const empty = await store.createProduct(inventoryItem({name: 'Silk', stock: 0}))
-  const admin = await adminCookie(handle)
-  const base = {name: 'Barong', price: 100, stock: 1}
-  assert.equal((await handle(request('/api/shop-products', 'POST', {...base, fabrics: [{inventoryItemId: 'nope', quantity: 1}]}, admin))).status, 400)
-  const out = await handle(request('/api/shop-products', 'POST', {...base, fabrics: [{inventoryItemId: empty.id, quantity: 1}]}, admin))
-  assert.equal(out.status, 400)
-  assert.match((await out.json() as {error: string}).error, /out of stock/)
-  assert.equal((await handle(request('/api/shop-products', 'POST', {...base, fabrics: [{inventoryItemId: fabric.id, quantity: 1}, {inventoryItemId: fabric.id, quantity: 2}]}, admin))).status, 400)
-
-  // A fabric already on a product may stay after it runs out.
-  const product = await (await handle(request('/api/shop-products', 'POST', {...base, fabrics: [{inventoryItemId: fabric.id, quantity: 1}]}, admin))).json() as ShopProduct
-  await store.updateProduct(fabric.id, {stock: 0})
-  assert.equal((await handle(request(`/api/shop-products/${product.id}`, 'PUT', {fabrics: [{inventoryItemId: fabric.id, quantity: 2}]}, admin))).status, 200)
+  const visible = await store.createProduct(inventoryItem({name: 'Cotton twill, navy', stock: 10}))
+  await store.createProduct(inventoryItem({name: 'Silk', stock: 0}))
+  const hidden = await store.createProduct(inventoryItem({name: 'Hidden linen', stock: 8, active: false}))
+  const customer = await customerCookie(handle)
+  assert.equal((await handle(request('/api/fabrics'))).status, 401)
+  const list = await (await handle(request('/api/fabrics', 'GET', undefined, customer))).json() as {id:string;name:string;stock:number;price?:number}[]
+  assert.deepEqual(list.map(i => i.id), [visible.id])
+  assert.equal(list[0].name, 'Cotton twill, navy')
+  assert.equal('price' in list[0], false)
+  assert.equal((await handle(request('/api/products', 'GET', undefined, customer))).status, 403)
+  assert.equal((await handle(request(`/api/products/${hidden.id}`, 'GET', undefined, customer))).status, 403)
 })
 
-test('ordering a product deducts product stock and fabric inventory, alerts low stock, and cancel restores both', async () => {
+test('ordering a product requires an in-stock fabric and allowed color and size, and does not deduct fabric inventory', async () => {
   const {handle, store} = setup()
   const fabric = await store.createProduct(inventoryItem({stock: 10}))
+  const empty = await store.createProduct(inventoryItem({name: 'Silk', stock: 0}))
+  const hidden = await store.createProduct(inventoryItem({name: 'Hidden linen', stock: 8, active: false}))
   const admin = await adminCookie(handle)
   const customer = await customerCookie(handle)
   const product = await (await handle(request('/api/shop-products', 'POST', {
-    name: 'Navy barong', price: 3200, stock: 5, status: 'active', fabrics: [{inventoryItemId: fabric.id, quantity: 2.5}],
+    name: 'Navy barong', description: 'Handwoven', price: 3200, stock: 5, colors: [{name: 'Navy'}, {name: 'White'}], sizes: ['M', 'L'], patternStyles: ['crew'], clothingType: 'tshirt',
   }, admin))).json() as ShopProduct
 
-  const placed = await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 2}]}, customer))
+  assert.equal((await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 2, size: 'M', style: 'crew', color: 'Navy'}]}, customer))).status, 400)
+  assert.equal((await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 2, size: 'M', style: 'crew', color: 'Navy', fabricId: 'nope'}]}, customer))).status, 400)
+  assert.equal((await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 2, size: 'M', style: 'crew', color: 'Navy', fabricId: empty.id}]}, customer))).status, 409)
+  assert.equal((await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 2, size: 'M', style: 'crew', color: 'Navy', fabricId: hidden.id}]}, customer))).status, 400)
+  assert.equal((await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 2, size: 'M', style: 'crew', color: 'Red', fabricId: fabric.id}]}, customer))).status, 400)
+  assert.equal((await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 2, size: 'XXL', style: 'crew', color: 'Navy', fabricId: fabric.id}]}, customer))).status, 400)
+
+  const placed = await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 2, size: 'L', style: 'crew', color: 'White', fabricId: fabric.id}]}, customer))
   assert.equal(placed.status, 201)
   const order = await placed.json() as ShopOrder
   assert.equal(order.total, 6400)
   assert.equal(order.items[0].kind, 'product')
-  assert.equal(order.items[0].fabrics?.[0].quantity, 2.5)
+  assert.equal(order.items[0].size, 'L')
+  assert.equal(order.items[0].style, 'crew')
+  assert.equal(order.items[0].color, 'White')
+  assert.equal(order.items[0].qty, 2)
+  assert.deepEqual(order.items[0].chosenFabric, {inventoryItemId: fabric.id, name: 'Cotton twill, navy', unit: 'yd'})
+  assert.equal(order.items[0].fabrics, undefined)
   assert.equal((await store.getShopProduct(product.id))?.stock, 3)
-  assert.equal((await store.getProduct(fabric.id))?.stock, 5)
+  assert.equal((await store.getProduct(fabric.id))?.stock, 10)
 
   const feed = await (await handle(request('/api/notifications', 'GET', undefined, admin))).json() as {notifications: ShopNotification[]}
   assert.equal(feed.notifications.some(n => n.type === 'order_placed'), true)
-  assert.equal(feed.notifications.some(n => n.type === 'low_stock' && n.title.includes('Cotton twill')), true)
+  assert.equal(feed.notifications.some(n => n.type === 'low_stock'), false)
 
-  // Not enough fabric left for 3 more (needs 7.5 yd, 5 left) even though 3 products are "available".
-  const short = await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 3}]}, customer))
+  const short = await handle(request('/api/orders', 'POST', {items: [{productId: product.id, qty: 4, size: 'M', style: 'crew', color: 'Navy', fabricId: fabric.id}]}, customer))
   assert.equal(short.status, 409)
   assert.equal((await store.getShopProduct(product.id))?.stock, 3)
-  assert.equal((await store.getProduct(fabric.id))?.stock, 5)
+  assert.equal((await store.getProduct(fabric.id))?.stock, 10)
 
   assert.equal((await handle(request(`/api/orders/${order.id}`, 'PATCH', {status: 'Cancelled'}, customer))).status, 200)
   assert.equal((await store.getShopProduct(product.id))?.stock, 5)
   assert.equal((await store.getProduct(fabric.id))?.stock, 10)
 
-  // Admin reopening re-reserves product and fabric.
   assert.equal((await handle(request(`/api/orders/${order.id}`, 'PATCH', {status: 'Paid'}, admin))).status, 200)
   assert.equal((await store.getShopProduct(product.id))?.stock, 3)
-  assert.equal((await store.getProduct(fabric.id))?.stock, 5)
+  assert.equal((await store.getProduct(fabric.id))?.stock, 10)
 })
 
 test('draft products cannot be ordered and customers cannot order raw inventory', async () => {
@@ -206,7 +238,7 @@ test('draft products cannot be ordered and customers cannot order raw inventory'
   const fabric = await store.createProduct(inventoryItem())
   const draft = await store.createShopProduct({name: 'Draft', description: '', price: 10, imageUrl: '', status: 'draft', stock: 5, fabrics: []})
   const customer = await customerCookie(handle)
-  assert.equal((await handle(request('/api/orders', 'POST', {items: [{productId: draft.id, qty: 1}]}, customer))).status, 400)
+  assert.equal((await handle(request('/api/orders', 'POST', {items: [{productId: draft.id, qty: 1, fabricId: fabric.id}]}, customer))).status, 400)
   assert.equal((await handle(request('/api/orders', 'POST', {items: [{productId: fabric.id, qty: 1}]}, customer))).status, 400)
   assert.equal((await handle(request('/api/orders', 'POST', {items: [{productId: fabric.id, qty: 1, kind: 'inventory'}]}, customer))).status, 403)
   assert.equal((await store.getProduct(fabric.id))?.stock, 10)

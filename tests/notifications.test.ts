@@ -106,7 +106,7 @@ test('placing an order notifies the admin and the customer, and emails are skipp
     const product = await store.createProduct(sampleProduct)
     const item = await sellable(store, product)
     const cookie = await customerCookie(handle)
-    const placed = await handle(request('/api/orders', 'POST', {items: [{productId: item.id, qty: 2}]}, {cookie}))
+    const placed = await handle(request('/api/orders', 'POST', {items: [{productId: item.id, qty: 2, fabricId: product.id}]}, {cookie}))
     assert.equal(placed.status, 201)
     const order = await placed.json() as ShopOrder
     assert.equal(order.status, 'Pending')
@@ -131,16 +131,15 @@ test('placing an order notifies the admin and the customer, and emails are skipp
   }
 })
 
-test('stock that drops to the threshold creates a low-stock notification for admin only', async () => {
+test('lowering inventory to the threshold creates a low-stock notification for admin only', async () => {
   const {handle, store} = setup()
   const product = await store.createProduct({...sampleProduct, stock: 6})
-  const item = await sellable(store, product)
+  const admin = await adminCookie(handle)
   const cookie = await customerCookie(handle)
-  const placed = await handle(request('/api/orders', 'POST', {items: [{productId: item.id, qty: 1}]}, {cookie}))
-  assert.equal(placed.status, 201)
+  const updated = await handle(request(`/api/products/${product.id}`, 'PUT', {stock: 5}, {cookie: admin}))
+  assert.equal(updated.status, 200)
   assert.equal((await store.getProduct(product.id))?.stock, 5)
 
-  const admin = await adminCookie(handle)
   const adminFeed = await (await handle(request('/api/notifications', 'GET', undefined, {cookie: admin}))).json() as {notifications: ShopNotification[]}
   const low = adminFeed.notifications.filter(item => item.type === 'low_stock')
   assert.equal(low.length, 1)
@@ -150,8 +149,8 @@ test('stock that drops to the threshold creates a low-stock notification for adm
   const customerFeed = await (await handle(request('/api/notifications', 'GET', undefined, {cookie}))).json() as {notifications: ShopNotification[]}
   assert.equal(customerFeed.notifications.some(item => item.type === 'low_stock'), false)
 
-  const again = await handle(request('/api/orders', 'POST', {items: [{productId: item.id, qty: 1}]}, {cookie}))
-  assert.equal(again.status, 201)
+  const again = await handle(request(`/api/products/${product.id}`, 'PUT', {stock: 4}, {cookie: admin}))
+  assert.equal(again.status, 200)
   const after = await (await handle(request('/api/notifications', 'GET', undefined, {cookie: admin}))).json() as {notifications: ShopNotification[]}
   assert.equal(after.notifications.filter(item => item.type === 'low_stock').length, 1)
 })
@@ -161,7 +160,7 @@ test('admin status changes notify the customer, and a customer cancel notifies t
   const product = await store.createProduct({...sampleProduct, stock: 18})
   const item = await sellable(store, product)
   const cookie = await customerCookie(handle)
-  const placed = await handle(request('/api/orders', 'POST', {items: [{productId: item.id, qty: 1}]}, {cookie}))
+  const placed = await handle(request('/api/orders', 'POST', {items: [{productId: item.id, qty: 1, fabricId: product.id}]}, {cookie}))
   const order = await placed.json() as ShopOrder
   const admin = await adminCookie(handle)
 
@@ -170,7 +169,7 @@ test('admin status changes notify the customer, and a customer cancel notifies t
   const customerFeed = await (await handle(request('/api/notifications', 'GET', undefined, {cookie}))).json() as {notifications: ShopNotification[]}
   assert.equal(customerFeed.notifications.some(item => item.type === 'order_status' && item.title.includes('Ready')), true)
 
-  const second = await handle(request('/api/orders', 'POST', {items: [{productId: item.id, qty: 1}]}, {cookie}))
+  const second = await handle(request('/api/orders', 'POST', {items: [{productId: item.id, qty: 1, fabricId: product.id}]}, {cookie}))
   const pending = await second.json() as ShopOrder
   assert.equal((await handle(request(`/api/orders/${pending.id}`, 'PATCH', {status: 'Paid'}, {cookie}))).status, 403)
   const cancelled = await handle(request(`/api/orders/${pending.id}`, 'PATCH', {status: 'Cancelled'}, {cookie}))
@@ -186,7 +185,7 @@ test('customers cannot read or mark another recipient\'s notifications', async (
   const product = await store.createProduct({...sampleProduct, stock: 18})
   const item = await sellable(store, product)
   const mine = await customerCookie(handle)
-  await handle(request('/api/orders', 'POST', {items: [{productId: item.id, qty: 1}]}, {cookie: mine}))
+  await handle(request('/api/orders', 'POST', {items: [{productId: item.id, qty: 1, fabricId: product.id}]}, {cookie: mine}))
   const other = createHandler({
     store,
     sessionSecret: () => secret,
