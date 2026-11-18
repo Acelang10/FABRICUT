@@ -1,5 +1,5 @@
 import {z} from 'zod'
-import {PRODUCT_CATEGORIES,ORDER_STATUSES,SHOP_PRODUCT_STATUSES} from '../types'
+import {ORDER_STATUSES,SHOP_PRODUCT_STATUSES} from '../types'
 import {PRODUCTION_STAGES} from '../clothing'
 
 const text = z.string().trim().min(1).max(200)
@@ -9,24 +9,20 @@ const imageUrl = z.string().trim().max(500).refine(
 )
 const inventoryShape = {
   name: text,
-  category: z.enum(PRODUCT_CATEGORIES),
-  price: z.number().finite().gt(0).max(10_000_000),
   // Inventory can be fractional (e.g. 16.5 yd left after a product used 1.5 yd).
   stock: z.number().finite().min(0).max(1_000_000).transform(v => Math.round(v * 100) / 100),
   unit: z.string().trim().min(1).max(40),
-  description: z.string().trim().max(2000),
-  imageColor: z.string().trim().min(1).max(40),
   imageUrl,
   active: z.boolean(),
 }
+// Inventory items are fabrics: name, stock, unit and photo. Category, price, swatch and description are no longer accepted.
 export const productInputSchema = z.object({
   ...inventoryShape,
-  description: inventoryShape.description.default(''),
-  imageColor: inventoryShape.imageColor.default('swatch'),
+  unit: inventoryShape.unit.default('yd'),
   imageUrl: imageUrl.default(''),
   active: inventoryShape.active.default(true),
 }).strict()
-// No defaults on update, so hiding an item never wipes its description, swatch or photo.
+// No defaults on update, so hiding a fabric never wipes its photo or leftover legacy fields.
 export const productUpdateSchema = z.object(inventoryShape).partial().strict()
 
 export const orderItemRequestSchema = z.object({

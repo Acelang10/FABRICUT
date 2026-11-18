@@ -58,7 +58,7 @@ function request(url: string, method = 'GET', body?: unknown, options?: {token?:
 // Customers buy sellable products (shop-products). Wrap an inventory item in a product that uses 1 unit of it.
 async function sellable(store: ReturnType<typeof createMemoryStore>, item: Product) {
   return store.createShopProduct({
-    name: item.name, description: '', price: item.price, imageUrl: '', status: 'active', stock: item.stock,
+    name: item.name, description: '', price: item.price ?? 1, imageUrl: '', status: 'active', stock: item.stock,
     fabrics: [{inventoryItemId: item.id, name: item.name, unit: item.unit, quantity: 1}],
   })
 }
@@ -163,14 +163,17 @@ test('role guards: a customer cannot use admin product, order, report, or patter
 test('product CRUD validates input and supports admin updates', async () => {
   const {handle} = setup()
   const cookie = await adminCookie(handle)
-  assert.equal((await handle(request('/api/products', 'POST', {...sampleProduct, name: ''}, {cookie}))).status, 400)
-  assert.equal((await handle(request('/api/products', 'POST', {...sampleProduct, price: -5}, {cookie}))).status, 400)
-  assert.equal((await handle(request('/api/products', 'POST', {...sampleProduct, stock: -1}, {cookie}))).status, 400)
-  assert.equal((await handle(request('/api/products', 'POST', {...sampleProduct, category: 'Hats'}, {cookie}))).status, 400)
-  const created = await handle(request('/api/products', 'POST', sampleProduct, {cookie}))
+  const fabric = {name: 'Piña Barong fabric', stock: 18, unit: 'yd', active: true}
+  assert.equal((await handle(request('/api/products', 'POST', {...fabric, name: ''}, {cookie}))).status, 400)
+  assert.equal((await handle(request('/api/products', 'POST', {...fabric, stock: -1}, {cookie}))).status, 400)
+  assert.equal((await handle(request('/api/products', 'POST', {...fabric, price: -5}, {cookie}))).status, 400)
+  assert.equal((await handle(request('/api/products', 'POST', {...fabric, category: 'Hats'}, {cookie}))).status, 400)
+  const created = await handle(request('/api/products', 'POST', fabric, {cookie}))
   assert.equal(created.status, 201)
   const product = await created.json() as Product
-  assert.equal(product.price, 2850)
+  assert.equal(product.name, 'Piña Barong fabric')
+  assert.equal(product.stock, 18)
+  assert.equal(product.price, undefined)
   const updated = await handle(request(`/api/products/${product.id}`, 'PUT', {stock: 20, active: false}, {cookie}))
   assert.equal(updated.status, 200)
   assert.equal((await updated.json()).active, false)

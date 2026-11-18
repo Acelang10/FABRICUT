@@ -1,12 +1,11 @@
 "use client"
 import {useEffect,useState} from 'react'
 import {api} from '@/lib/client/api'
-import {peso} from '@/lib/format'
-import {LOW_STOCK_THRESHOLD,PRODUCT_CATEGORIES,type Product,type ProductCategory} from '@/lib/types'
-import Swatch from './Swatch'
+import {LOW_STOCK_THRESHOLD,type Product} from '@/lib/types'
+import FabricThumb from './FabricThumb'
 import ImageUpload from '../ImageUpload'
 
-const emptyForm={name:'',category:'Fabrics' as ProductCategory,price:'',stock:'',unit:'yd',description:'',imageColor:'pina',imageUrl:'',active:true}
+const emptyForm={name:'',stock:'',unit:'yd',imageUrl:'',active:true}
 
 export default function InventoryView(){
   const [products,setProducts]=useState<Product[]>([])
@@ -35,12 +34,8 @@ export default function InventoryView(){
     setEditing(product)
     setForm({
       name:product.name,
-      category:product.category,
-      price:String(product.price),
       stock:String(product.stock),
-      unit:product.unit,
-      description:product.description,
-      imageColor:product.imageColor,
+      unit:product.unit||'yd',
       imageUrl:product.imageUrl||'',
       active:product.active,
     })
@@ -53,12 +48,8 @@ export default function InventoryView(){
     try{
       const payload={
         name:form.name,
-        category:form.category,
-        price:Number(form.price),
         stock:Number(form.stock),
         unit:form.unit,
-        description:form.description,
-        imageColor:form.imageColor,
         imageUrl:form.imageUrl.trim(),
         active:form.active,
       }
@@ -66,7 +57,7 @@ export default function InventoryView(){
       else await api('/products','POST',payload)
       setOpen(false)
       await refresh()
-    }catch(err){setError(err instanceof Error?err.message:'Could not save item')}
+    }catch(err){setError(err instanceof Error?err.message:'Could not save fabric')}
     finally{setBusy(false)}
   }
 
@@ -75,7 +66,7 @@ export default function InventoryView(){
     try{
       await api(`/products/${encodeURIComponent(product.id)}`,'PUT',{active:!product.active})
       await refresh()
-    }catch(err){setError(err instanceof Error?err.message:'Could not update item')}
+    }catch(err){setError(err instanceof Error?err.message:'Could not update fabric')}
   }
 
   async function remove(product:Product){
@@ -84,7 +75,7 @@ export default function InventoryView(){
     try{
       await api(`/products/${encodeURIComponent(product.id)}`,'DELETE')
       await refresh()
-    }catch(err){setError(err instanceof Error?err.message:'Could not delete item')}
+    }catch(err){setError(err instanceof Error?err.message:'Could not delete fabric')}
   }
 
   return (
@@ -92,25 +83,23 @@ export default function InventoryView(){
       <div className="atelier-hello">
         <div>
           <h1>Inventory</h1>
-          <p>Raw fabrics and materials (admin only). Customers buy from Products, which use these items.</p>
+          <p>Fabrics available in the workshop (admin only). Customers buy from Products, which use these fabrics.</p>
         </div>
-        <button type="button" className="atelier-btn atelier-btn-y" onClick={startAdd}>+ Add item</button>
+        <button type="button" className="atelier-btn atelier-btn-y" onClick={startAdd}>+ Add fabric</button>
       </div>
       {error?<p className="atelier-error" role="alert">{error}</p>:null}
       {loading?<p role="status">Loading inventory…</p>:null}
-      {!loading&&products.length===0?<p className="atelier-empty">No items yet. Use + Add item to record your fabrics and materials.</p>:null}
+      {!loading&&products.length===0?<p className="atelier-empty">No fabrics yet. Use + Add fabric to record what is available.</p>:null}
       {products.length>0?(
         <div className="atelier-table-wrap">
           <table className="atelier-table">
             <thead>
-              <tr><th>Item</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th></th></tr>
+              <tr><th>Fabric</th><th>Stock</th><th>Status</th><th></th></tr>
             </thead>
             <tbody>
               {products.map(product=>(
                 <tr key={product.id}>
-                  <td><span className="atelier-cell"><InventoryThumb product={product}/><strong>{product.name}</strong></span></td>
-                  <td>{product.category}</td>
-                  <td>{peso(product.price)}{product.unit==='yd'?' / yd':` / ${product.unit}`}</td>
+                  <td><span className="atelier-cell"><FabricThumb product={product}/><strong>{product.name}</strong></span></td>
                   <td className={product.stock<=LOW_STOCK_THRESHOLD?'atelier-low':undefined}>{product.stock} {product.unit}{product.stock<=LOW_STOCK_THRESHOLD?' · low':''}</td>
                   <td>{product.active?'Active':'Hidden'}</td>
                   <td className="atelier-row-actions">
@@ -127,41 +116,21 @@ export default function InventoryView(){
       {open?(
         <div className="atelier-modal" role="dialog" aria-modal="true" aria-labelledby="inv-form-title">
           <form className="atelier-dialog" onSubmit={e=>void save(e)}>
-            <h2 id="inv-form-title">{editing?'Edit item':'Add item'}</h2>
-            <label>Name<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required maxLength={200}/></label>
-            <label>Category
-              <select value={form.category} onChange={e=>setForm({...form,category:e.target.value as ProductCategory})}>
-                {PRODUCT_CATEGORIES.map(c=><option key={c}>{c}</option>)}
-              </select>
-            </label>
+            <h2 id="inv-form-title">{editing?'Edit fabric':'Add fabric'}</h2>
+            <label>Fabric name<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required maxLength={200}/></label>
             <div className="atelier-form-row">
-              <label>Price (₱)<input type="number" min="0.01" step="0.01" value={form.price} onChange={e=>setForm({...form,price:e.target.value})} required/></label>
               <label>Stock<input type="number" min="0" step="0.01" value={form.stock} onChange={e=>setForm({...form,stock:e.target.value})} required/></label>
               <label>Unit<input value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})} required maxLength={40}/></label>
             </div>
-            <label>Placeholder swatch
-              <select value={form.imageColor} onChange={e=>setForm({...form,imageColor:e.target.value})}>
-                {['pina','twill','patch','lace','lining','kit','swatch'].map(c=><option key={c} value={c}>{c}</option>)}
-              </select>
-            </label>
-            <ImageUpload kind="inventory" label="Item photo" value={form.imageUrl} onChange={url=>setForm(f=>({...f,imageUrl:url}))}/>
-            <label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} maxLength={2000} rows={3}/></label>
-            <label className="atelier-check"><input type="checkbox" checked={form.active} onChange={e=>setForm({...form,active:e.target.checked})}/> Active (available for products and walk-in orders)</label>
+            <ImageUpload kind="inventory" label="Fabric photo" value={form.imageUrl} onChange={url=>setForm(f=>({...f,imageUrl:url}))}/>
+            <label className="atelier-check"><input type="checkbox" checked={form.active} onChange={e=>setForm({...form,active:e.target.checked})}/> Active (available for products)</label>
             <div className="atelier-dialog-actions">
               <button type="button" className="atelier-btn atelier-btn-ghost" onClick={()=>setOpen(false)}>Cancel</button>
-              <button type="submit" className="atelier-btn atelier-btn-b" disabled={busy}>{busy?'Saving…':'Save item'}</button>
+              <button type="submit" className="atelier-btn atelier-btn-b" disabled={busy}>{busy?'Saving…':'Save fabric'}</button>
             </div>
           </form>
         </div>
       ):null}
     </>
   )
-}
-
-/** Photo thumbnail when the item has one (falls back to the swatch if it fails to load). */
-function InventoryThumb({product}:{product:Product}){
-  const [failed,setFailed]=useState(false)
-  if(!product.imageUrl||failed) return <Swatch tone={product.imageColor}/>
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={product.imageUrl} alt="" className="inventory-thumb" loading="lazy" referrerPolicy="no-referrer" onError={()=>setFailed(true)}/>
 }

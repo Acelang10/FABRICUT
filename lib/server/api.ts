@@ -426,11 +426,13 @@ export function createHandler(deps:Dependencies={}){
 
       if(route==='reports'&&method==='GET'){
         if(user.role!=='admin') return json({error:'Admin access required'},403)
-        const [orders,products]=await Promise.all([store().listOrders(),store().listProducts()])
+        const [orders,products,shopProducts]=await Promise.all([store().listOrders(),store().listProducts(),store().listShopProducts()])
         const reports=buildReports(orders)
         const threshold=lowStockThreshold()
         const lowStock=products.filter(p=>p.active&&p.stock<=threshold)
-        return json({...reports,productCount:products.length,lowStock,lowStockThreshold:threshold,catalogValue:products.reduce((sum,p)=>sum+p.price*p.stock,0)})
+        // Catalog value uses sellable products; inventory fabrics no longer have a price.
+        const catalogValue=shopProducts.reduce((sum,p)=>sum+p.price*p.stock,0)
+        return json({...reports,productCount:shopProducts.length,lowStock,lowStockThreshold:threshold,catalogValue})
       }
 
       if(segments[0]==='notifications'){

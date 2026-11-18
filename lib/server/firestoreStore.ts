@@ -8,20 +8,25 @@ import {PRODUCTION_STAGES,withGarmentDefaults,type ProductionStage} from '../clo
 import {adminFirestore} from './firebaseAdmin'
 
 function productFrom(id:string,data:DocumentData):Product{
-  return {
+  const product:Product={
     id,
     name:String(data.name||''),
-    category:data.category,
-    price:Number(data.price),
-    stock:Number(data.stock),
-    unit:String(data.unit||''),
-    description:String(data.description||''),
-    imageColor:String(data.imageColor||'swatch'),
+    stock:Number(data.stock)||0,
+    unit:String(data.unit||'yd'),
     imageUrl:String(data.imageUrl||''),
     active:data.active!==false,
     createdAt:String(data.createdAt||''),
     updatedAt:String(data.updatedAt||''),
   }
+  // Keep leftover fields from older docs so a later hide/show or edit does not wipe them.
+  if(data.category) product.category=data.category
+  if(data.price!=null&&data.price!==''){
+    const price=Number(data.price)
+    if(Number.isFinite(price)) product.price=price
+  }
+  if(data.description!=null&&data.description!=='') product.description=String(data.description)
+  if(data.imageColor) product.imageColor=String(data.imageColor)
+  return product
 }
 
 function fabricsFrom(value:unknown):FabricUse[]{
@@ -96,8 +101,8 @@ function orderFrom(id:string,data:DocumentData):ShopOrder{
 }
 
 function productFields(input:ProductInput|Product){
-  const {name,category,price,stock,unit,description,imageColor,active}=input
-  return {name,category,price,stock,unit,description,imageColor,imageUrl:input.imageUrl||'',active}
+  // Only the current fabric fields are written. Legacy keys are left untouched on existing docs.
+  return {name:input.name,stock:input.stock,unit:input.unit,imageUrl:input.imageUrl||'',active:input.active}
 }
 
 /** Firestore-safe copy of order lines (no undefined fields). */

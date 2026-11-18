@@ -8,14 +8,15 @@ import {LOW_STOCK_THRESHOLD} from '../types'
 
 export interface ProductInput {
   name:string
-  category:Product['category']
-  price:number
   stock:number
   unit:string
-  description:string
-  imageColor:string
   imageUrl?:string
   active:boolean
+  /** Optional leftover fields from older inventory records. Not written by the new form. */
+  category?:Product['category']
+  price?:number
+  description?:string
+  imageColor?:string
 }
 
 export type ProfilePatch = Partial<Omit<UserProfile,'id'|'updatedAt'>>
@@ -200,7 +201,7 @@ export function orderLines(merged:ReturnType<typeof mergeQty>,find:{shop:(id:str
       const product=find.inventory(item.productId)
       if(!product||!product.active) throw new StoreError('Product is not available',400)
       if(product.stock<item.qty) throw new StoreError(`Insufficient stock for ${product.name}`,409)
-      lines.push({productId:product.id,name:product.name,price:product.price,qty:item.qty,kind:'inventory'})
+      lines.push({productId:product.id,name:product.name,price:product.price??0,qty:item.qty,kind:'inventory'})
     }
   }
   return lines
@@ -415,16 +416,16 @@ function implementation(load:()=>Promise<DataFile>, persist:(data:DataFile)=>Pro
 
 export const sampleProducts=():Product[]=>{
   const now=new Date().toISOString()
-  const rows:[string,Product['category'],number,number,string,string,string][]=[
-    ['Piña Barong fabric','Fabrics',2850,18,'yd','Handwoven piña cloth for formal barong Tagalog.','pina'],
-    ['Cotton twill, navy','Fabrics',450,42,'yd','Sturdy navy cotton twill, sold per yard.','twill'],
-    ['Custom-cut patch','Custom-cut',180,64,'pcs','Custom laser or hand-cut fabric patch.','patch'],
-    ['Laser-cut lace panel','Laser-cut',1250,9,'pcs','Decorative lace panel cut on the workshop laser.','lace'],
-    ['Formal lining, silk-blend','Fabrics',890,27,'yd','Silk-blend lining for formal wear.','lining'],
-    ['Wedding barong kit','Tailoring',4500,7,'kits','Fabric kit and pattern set for a wedding barong.','kit'],
+  const rows:[string,number,string][]=[
+    ['Piña Barong fabric',18,'yd'],
+    ['Cotton twill, navy',42,'yd'],
+    ['Custom-cut patch',64,'pcs'],
+    ['Laser-cut lace panel',9,'pcs'],
+    ['Formal lining, silk-blend',27,'yd'],
+    ['Wedding barong kit',7,'kits'],
   ]
-  return rows.map(([name,category,price,stock,unit,description,imageColor],i)=>({
-    id:`sample-${i+1}`,name,category,price,stock,unit,description,imageColor,active:true,createdAt:now,updatedAt:now,
+  return rows.map(([name,stock,unit],i)=>({
+    id:`sample-${i+1}`,name,stock,unit,active:true,createdAt:now,updatedAt:now,
   }))
 }
 

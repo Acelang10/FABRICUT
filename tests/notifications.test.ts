@@ -59,7 +59,7 @@ function request(url: string, method = 'GET', body?: unknown, options?: {token?:
 // Customers buy sellable products (shop-products). Wrap an inventory item in a product that uses 1 unit of it.
 async function sellable(store: ReturnType<typeof createMemoryStore>, item: Product) {
   return store.createShopProduct({
-    name: item.name, description: '', price: item.price, imageUrl: '', status: 'active', stock: item.stock,
+    name: item.name, description: '', price: item.price ?? 1, imageUrl: '', status: 'active', stock: item.stock,
     fabrics: [{inventoryItemId: item.id, name: item.name, unit: item.unit, quantity: 1}],
   })
 }

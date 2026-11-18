@@ -196,19 +196,21 @@ test('profiles: sign-in required, each user only reads and edits their own, admi
   assert.equal((await handle(req('/api/profile', 'PUT', {birthday: 'not-a-date'}, alice))).status, 400)
 })
 
-test('inventory photo is saved, and hiding an item no longer wipes description, swatch or photo', async () => {
-  const {handle} = setup()
+test('inventory photo is saved, and hiding a fabric does not wipe leftover description, swatch or photo', async () => {
+  const {handle, store} = setup()
   const admin = await adminCookie(handle)
   const created = await (await handle(req('/api/products', 'POST', {
-    name: 'Linen', category: 'Fabrics', price: 300, stock: 5, unit: 'yd', description: 'Soft', imageColor: 'pina',
+    name: 'Linen', stock: 5, unit: 'yd',
     imageUrl: 'https://res.cloudinary.com/demo-cloud/image/upload/f_auto,q_auto/fabricut/inventory/img-a',
   }, admin))).json() as Product
   assert.match(created.imageUrl || '', /fabricut\/inventory/)
+  // Older inventory docs may still have these fields. A hide/show must not clear them.
+  await store.updateProduct(created.id, {description: 'Soft', imageColor: 'pina'})
   const hidden = await (await handle(req(`/api/products/${created.id}`, 'PUT', {active: false}, admin))).json() as Product
   assert.equal(hidden.active, false)
   assert.equal(hidden.description, 'Soft')
   assert.equal(hidden.imageColor, 'pina')
   assert.equal(hidden.imageUrl, created.imageUrl)
   assert.deepEqual(productUpdateSchema.parse({active: true}), {active: true})
-  assert.equal((await handle(req('/api/products', 'POST', {name: 'X', category: 'Fabrics', price: 1, stock: 1, unit: 'yd', imageUrl: 'javascript:alert(1)'}, admin))).status, 400)
+  assert.equal((await handle(req('/api/products', 'POST', {name: 'X', stock: 1, unit: 'yd', imageUrl: 'javascript:alert(1)'}, admin))).status, 400)
 })

@@ -106,8 +106,8 @@ export default function OrdersView(){
                     <optgroup label="Products">
                       {shopProducts.filter(p=>p.status==='active').map(p=><option key={p.id} value={`product:${p.id}`} disabled={p.stock<=0}>{p.name} · {peso(p.price)} · {p.stock} available</option>)}
                     </optgroup>
-                    <optgroup label="Inventory (raw material)">
-                      {products.filter(p=>p.active).map(p=><option key={p.id} value={`inventory:${p.id}`} disabled={p.stock<=0}>{p.name} · {peso(p.price)} · {p.stock} {p.unit}</option>)}
+                    <optgroup label="Fabrics (inventory)">
+                      {products.filter(p=>p.active).map(p=><option key={p.id} value={`inventory:${p.id}`} disabled={p.stock<=0}>{p.name} · {p.stock} {p.unit}</option>)}
                     </optgroup>
                   </select>
                 </label>

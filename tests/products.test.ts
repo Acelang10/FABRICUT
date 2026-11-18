@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {createHandler} from '../lib/server/api'
 import {createMemoryStore} from '../lib/server/store'
 import {availableFabricOptions,inventoryUsage} from '../lib/fabrics'
-import {shopProductInputSchema,shopProductUpdateSchema} from '../lib/server/shop-schema'
+import {productInputSchema,shopProductInputSchema,shopProductUpdateSchema} from '../lib/server/shop-schema'
 import type {Identity} from '../lib/server/identity'
 import type {Product,ShopNotification,ShopOrder,ShopProduct} from '../lib/types'
 
@@ -60,6 +60,22 @@ const inventoryItem = (over: Partial<Product> = {}) => ({
 function inv(id: string, name: string, stock: number): Product {
   return {id, name, stock, category: 'Fabrics', price: 1, unit: 'yd', description: '', imageColor: 'swatch', active: true}
 }
+
+test('inventory API accepts fabric name, stock, unit and photo, and rejects leftover sale fields', () => {
+  const ok = productInputSchema.parse({name: 'Linen', stock: 4.25})
+  assert.equal(ok.unit, 'yd')
+  assert.equal(ok.active, true)
+  assert.equal(ok.stock, 4.25)
+  assert.equal(ok.imageUrl, '')
+  for (const bad of [
+    {name: '', stock: 1},
+    {name: 'X', stock: -1},
+    {name: 'X', stock: 1, category: 'Fabrics'},
+    {name: 'X', stock: 1, price: 10},
+    {name: 'X', stock: 1, description: 'nope'},
+    {name: 'X', stock: 1, imageColor: 'pina'},
+  ]) assert.equal(productInputSchema.safeParse(bad).success, false, JSON.stringify(bad))
+})
 
 test('fabric dropdown lists only inventory with stock left, sorted, keeping already-chosen fabrics', () => {
   const list = [inv('a', 'Wool', 3), inv('b', 'Linen', 0), inv('c', 'Cotton', 0.5), inv('d', 'Silk', 0)]

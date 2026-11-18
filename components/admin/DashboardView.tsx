@@ -4,7 +4,7 @@ import Link from 'next/link'
 import {api} from '@/lib/client/api'
 import {peso} from '@/lib/format'
 import {LOW_STOCK_THRESHOLD,type Product,type ShopOrder} from '@/lib/types'
-import Swatch from './Swatch'
+import FabricThumb from './FabricThumb'
 
 interface Reports {
   weekRevenue:number
@@ -48,20 +48,19 @@ export default function DashboardView(){
           <section className="atelier-tile atelier-inv">
             <div className="atelier-head">
               <h2>Inventory</h2>
-              <Link href="/admin/inventory" className="atelier-btn atelier-btn-y atelier-btn-sm">+ Add item</Link>
+              <Link href="/admin/inventory" className="atelier-btn atelier-btn-y atelier-btn-sm">+ Add fabric</Link>
             </div>
-            {products.length===0?<p className="atelier-empty">No products yet. Add the first item in Inventory.</p>:
+            {products.length===0?<p className="atelier-empty">No fabrics yet. Add the first fabric in Inventory.</p>:
               <div className="atelier-plist">
                 {products.map(product=>(
                   <Link key={product.id} href="/admin/inventory" className="atelier-row">
-                    <Swatch tone={product.imageColor}/>
+                    <FabricThumb product={product}/>
                     <div>
                       <strong>{product.name}</strong>
                       <span className={product.stock<=LOW_STOCK_THRESHOLD?'atelier-low':undefined}>
-                        {product.category} · {product.stock} {product.unit}{product.stock<=LOW_STOCK_THRESHOLD?' · low':''}
+                        {product.stock} {product.unit}{product.stock<=LOW_STOCK_THRESHOLD?' · low':''}
                       </span>
                     </div>
-                    <span className="atelier-px">{peso(product.price)}{product.unit==='yd'?' / yd':''}</span>
                   </Link>
                 ))}
               </div>}

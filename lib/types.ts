@@ -22,15 +22,16 @@ export const DEFAULT_LOW_STOCK_THRESHOLD = 5
 export const LOW_STOCK_THRESHOLD = DEFAULT_LOW_STOCK_THRESHOLD
 export interface Product extends Meta {
   name:string
-  category:ProductCategory
-  price:number
   stock:number
   unit:string
-  description:string
-  imageColor:string
   /** Optional photo (Cloudinary or other https link). */
   imageUrl?:string
   active:boolean
+  /** Legacy fields that may still exist on older inventory docs. Ignored by the form and API. */
+  category?:ProductCategory
+  price?:number
+  description?:string
+  imageColor?:string
 }
 export const SHOP_PRODUCT_STATUSES = ['draft','active'] as const
 export type ShopProductStatus = typeof SHOP_PRODUCT_STATUSES[number]
