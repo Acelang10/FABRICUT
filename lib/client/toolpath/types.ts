@@ -16,7 +16,14 @@ export type FitOptions = {
   keepAspect: boolean
   marginMm: number
   flipY?: boolean // SVG y-down -> machine y-up style if needed; default flip for SVG
+  /** Saved work box. Width and length are fitted inside it. Defaults to 0..bed. */
+  workX0?: number
+  workX1?: number
+  workY0?: number
+  workY1?: number
 }
+
+export type WorkBox = { x0: number; x1: number; y0: number; y1: number }
 
 export type PathStats = {
   lengthMm: number

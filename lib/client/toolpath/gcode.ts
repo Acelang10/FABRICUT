@@ -1,6 +1,9 @@
-import type { Polylines } from './types'
-import { DEFAULT_FEED_MM_PER_MIN, DEFAULT_TRAVEL_FEED } from './types'
+import type { Point, Polylines } from './types'
+import { DEFAULT_FEED_MM_PER_MIN } from './types'
 import { pathStats } from './geometry'
+
+/** Firmware rejects one move longer than 4096 steps (40 mm at 102.4 steps/mm). */
+const MAX_SEGMENT_MM = 30
 
 function fmt(n: number): string {
   return (Math.round(n * 1000) / 1000).toFixed(3).replace(/\.?0+$/, (m) => (m.includes('.') ? m.replace(/0+$/, '').replace(/\.$/, '') : m))
@@ -8,6 +11,17 @@ function fmt(n: number): string {
 // simpler fixed 3 decimals
 function f3(n: number): string {
   return (Math.round(n * 1000) / 1000).toFixed(3)
+}
+
+function hops(from: Point, to: Point): Point[] {
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  const dist = Math.hypot(dx, dy)
+  if (dist <= MAX_SEGMENT_MM) return [to]
+  const n = Math.ceil(dist / MAX_SEGMENT_MM)
+  const pts: Point[] = []
+  for (let i = 1; i <= n; i++) pts.push({ x: from.x + (dx * i) / n, y: from.y + (dy * i) / n })
+  return pts
 }
 
 /**
@@ -21,19 +35,23 @@ export function polylinesToGcode(
   opts: { feed?: number; travelFeed?: number } = {},
 ): string[] {
   const feed = opts.feed ?? DEFAULT_FEED_MM_PER_MIN
-  const travel = opts.travelFeed ?? DEFAULT_TRAVEL_FEED
+  // Travel at the same speed as the cut. A faster default (and a bare F line) never
+  // moves this machine: jog works at the selected mm/min, and the board rejects F alone.
+  const travel = opts.travelFeed ?? feed
   const lines: string[] = []
-  lines.push(`F${Math.round(feed)}`)
+  let here: Point = { x: 0, y: 0 }
   lines.push('M5') // laser off
   for (const poly of polys) {
     if (poly.length < 2) continue
     const start = poly[0]
     if (lines.at(-1) !== 'M5') lines.push('M5') // laser off before travel
-    lines.push(`G0 X${f3(start.x)} Y${f3(start.y)} F${Math.round(travel)}`)
+    for (const p of hops(here, start)) lines.push(`G0 X${f3(p.x)} Y${f3(p.y)} F${Math.round(travel)}`)
+    here = start
     lines.push('M3') // laser on for this path's cutting moves
     for (let i = 1; i < poly.length; i++) {
       const p = poly[i]
-      lines.push(`G1 X${f3(p.x)} Y${f3(p.y)} F${Math.round(feed)}`)
+      for (const q of hops(here, p)) lines.push(`G1 X${f3(q.x)} Y${f3(q.y)} F${Math.round(feed)}`)
+      here = p
     }
     lines.push('M5') // laser off after cut
   }
@@ -42,7 +60,7 @@ export function polylinesToGcode(
 }
 
 export function estimateFromGcodePolys(polys: Polylines, feed = DEFAULT_FEED_MM_PER_MIN) {
-  return pathStats(polys, feed, DEFAULT_TRAVEL_FEED)
+  return pathStats(polys, feed, feed)
 }
 
 export { fmt }

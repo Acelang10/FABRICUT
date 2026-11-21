@@ -33,8 +33,14 @@ class FakePort {
           if (verb === 'ARM') { p.armed = true; p.reason = 'armed'; p.laser = 'off'; p.laser_latched = false }
           if (verb === 'STOP') { p.armed = false; p.state = 'idle'; p.reason = 'stop'; p.laser = 'off'; p.laser_latched = false }
           if (verb === 'M3') { if (p.armed) { p.laser_latched = true; p.reason = 'laser_on' } else { p.reason = 'not_armed' } }
-          if (verb === 'M5') { p.laser_latched = false; p.laser = 'off'; p.reason = 'laser_off' }
-          if (verb.startsWith('JOG') || verb.startsWith('G0')) { p.laser = 'off'; p.state = 'idle'; p.reason = 'done' }
+          if (verb === 'M5') {
+            p.laser_latched = false; p.laser = 'off'; p.reason = 'laser_off'
+            if (this.disarmOnM5) p.armed = false
+          }
+          if (verb.startsWith('JOG') || verb.startsWith('G0')) {
+            if (!p.armed) { p.reason = 'not_armed'; p.laser = 'off' }
+            else { p.laser = 'off'; p.state = 'idle'; p.reason = 'done' }
+          }
           if (verb.startsWith('G1') && verb.includes('X999')) {
             p.reason = 'soft_limit'; p.laser = 'off'; p.laser_latched = false
           } else if (verb.startsWith('G1')) {
@@ -99,6 +105,22 @@ test('fake UART HELLO/ARM/jog/laser stream with ack flow', async () => {
   }
 })
 
+test('motion re-arms once when the board drops the arm', async () => {
+  const port = new FakePort()
+  port.disarmOnM5 = true
+  const c = new StepperSerialClient()
+  try {
+    await c.connect(port)
+    await c.arm()
+    await c.streamGcode(['M5', 'G0 X1.000 Y2.000 F200'], { onProgress: () => {} })
+    assert.equal(c.status.armed, true)
+    assert.ok(port.lines.filter((l) => l.endsWith(' ARM')).length >= 2)
+    assert.ok(port.lines.some((l) => l.includes('G0 X1.000 Y2.000 F200')))
+  } finally {
+    await c.disconnect(false)
+  }
+})
+
 test('stream failure sends M5 (laser off)', async () => {
   const port = new FakePort()
   const c = new StepperSerialClient()
@@ -107,6 +129,26 @@ test('stream failure sends M5 (laser off)', async () => {
     await c.arm()
     await assert.rejects(c.streamGcode(['M3', 'G1 X999 Y1 F200']), /soft_limit/)
     assert.ok(port.lines.at(-1).endsWith(' M5'))
+  } finally {
+    await c.disconnect(false)
+  }
+})
+
+test('saved start point is a laser-off travel', async () => {
+  const port = new FakePort()
+  const c = new StepperSerialClient()
+  try {
+    await c.connect(port)
+    await c.arm()
+    port.packet.start_on = true
+    port.packet.start_x = 12.5
+    port.packet.start_y = 40
+    port.packet.laser = 'off'
+    await c.setStartPoint(12.5, 40)
+    assert.ok(port.lines.at(-1).endsWith(' SETPOINT 12.5 40'))
+    await c.goStartPoint(200)
+    assert.ok(port.lines.at(-1).endsWith(' STARTPT F200'))
+    assert.equal(c.status.laser, 'off')
   } finally {
     await c.disconnect(false)
   }

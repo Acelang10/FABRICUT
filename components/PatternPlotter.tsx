@@ -3,9 +3,17 @@ import {useEffect,useMemo,useRef,useState} from 'react'
 import {api,privateImage} from '@/lib/client/api'
 import type {StepperSerialClient,StepperStatus} from '@/lib/client/motor-serial.mjs'
 import {
-  WORK_X_MAX_MM,WORK_Y_MAX_MM,defaultFitOptions,fitToWork,svgToPolylines,
-  rasterToPolylines,polylinesToGcode,pathStats,type FitOptions,type Polylines,
+  defaultFitOptions,fitToWork,svgToPolylines,
+  rasterToPolylines,polylinesToGcode,pathStats,maxSizeForLimit,machineWorkBox,workBoxOf,
+  type FitOptions,type Polylines,type WorkBox,
 } from '@/lib/client/toolpath'
+
+function clampSize(f:FitOptions,key:'targetWidthMm'|'targetHeightMm',value:number):FitOptions{
+  const max=maxSizeForLimit(workBoxOf(f),f.marginMm)
+  const cap=key==='targetWidthMm'?max.targetWidthMm:max.targetHeightMm
+  const n=Number.isFinite(value)?Math.min(cap,Math.max(1,value)):cap
+  return {...f,[key]:Math.round(n*10)/10}
+}
 
 export type SharedSerial = {
   getClient:()=>StepperSerialClient|null
@@ -31,6 +39,21 @@ export default function PatternPlotter({serial,feed}:{serial:SharedSerial;feed:n
   const [savedName,setSavedName]=useState<string|null>(null)
   const [safetyAck,setSafetyAck]=useState(false)
 
+  const limitKey=serial.packet?.soft_limit
+    ? `${serial.packet.x_min},${serial.packet.x_max},${serial.packet.y_min},${serial.packet.y_max}`
+    : 'bed'
+
+  useEffect(()=>{
+    const parts=limitKey.split(',').map(Number)
+    const box:WorkBox=parts.length===4 && parts.every(Number.isFinite) && parts[0]<parts[1] && parts[2]<parts[3]
+      ? {x0:parts[0],x1:parts[1],y0:parts[2],y1:parts[3]}
+      : machineWorkBox()
+    setFit(f=>{
+      const sized=maxSizeForLimit(box,f.marginMm)
+      return {...f,...sized,workX0:box.x0,workX1:box.x1,workY0:box.y0,workY1:box.y1}
+    })
+  },[limitKey])
+
   const fitted=useMemo(()=>{
     if(!raw.length) return [] as Polylines
     try{ setError(''); return fitToWork(raw,fit) }
@@ -49,30 +72,30 @@ export default function PatternPlotter({serial,feed}:{serial:SharedSerial;feed:n
     if(!canvas) return
     const ctx=canvas.getContext('2d')
     if(!ctx) return
+    const box=workBoxOf(fit)
+    const spanX=Math.max(1e-6,box.x1-box.x0), spanY=Math.max(1e-6,box.y1-box.y0)
     const W=canvas.width, H=canvas.height
     ctx.clearRect(0,0,W,H)
     ctx.fillStyle='#f7fafc'
     ctx.fillRect(0,0,W,H)
-    const sx=W/WORK_X_MAX_MM, sy=H/WORK_Y_MAX_MM
-    // table outline
+    const sx=W/spanX, sy=H/spanY
     ctx.strokeStyle='#94a3b8'
     ctx.lineWidth=2
     ctx.strokeRect(1,1,W-2,H-2)
-    // soft Y note: full canvas height maps to 650mm
     ctx.fillStyle='#64748b'
     ctx.font='12px system-ui'
-    ctx.fillText(`${WORK_X_MAX_MM} × ${WORK_Y_MAX_MM} mm work area`, 8, 16)
+    ctx.fillText(`${spanX.toFixed(1)} × ${spanY.toFixed(1)} mm limit`, 8, 16)
     if(!fitted.length) return
     ctx.strokeStyle='#0f766e'
     ctx.lineWidth=1.5
     for(const poly of fitted){
       if(poly.length<2) continue
       ctx.beginPath()
-      ctx.moveTo(poly[0].x*sx, H-poly[0].y*sy)
-      for(let i=1;i<poly.length;i++) ctx.lineTo(poly[i].x*sx, H-poly[i].y*sy)
+      ctx.moveTo((poly[0].x-box.x0)*sx, H-(poly[0].y-box.y0)*sy)
+      for(let i=1;i<poly.length;i++) ctx.lineTo((poly[i].x-box.x0)*sx, H-(poly[i].y-box.y0)*sy)
       ctx.stroke()
     }
-  },[fitted])
+  },[fitted,fit])
 
   async function loadFile(file:File){
     setBusy(true); setSavedName(null)
@@ -116,6 +139,20 @@ export default function PatternPlotter({serial,feed}:{serial:SharedSerial;feed:n
     }finally{ setBusy(false) }
   }
 
+  async function loadSample(){
+    setBusy(true); setSavedName(null); setError('')
+    try{
+      const res=await fetch('/samples/test-cut.svg')
+      if(!res.ok) throw new Error('Sample SVG unavailable')
+      const text=await res.text()
+      setFit(f=>({...f,targetWidthMm:30,targetHeightMm:20,offsetXMm:0,offsetYMm:0,marginMm:2}))
+      setRaw(svgToPolylines(text))
+      setNotice('Sample SVG loaded: test-cut.svg (30 × 20 mm)')
+    }catch(e){
+      setRaw([]); setError(e instanceof Error?e.message:String(e)); setNotice('Load failed')
+    }finally{ setBusy(false) }
+  }
+
   async function startStream(){
     const c=serial.getClient()
     if(!c||!serial.ready) throw new Error('Connect USB first')
@@ -125,25 +162,32 @@ export default function PatternPlotter({serial,feed}:{serial:SharedSerial;feed:n
     await serial.assertStaff()
     setStreaming(true); setPaused(false); pauseRef.current=false; setProgress(0)
     try{
-      // Wrap stream to honor pause between lines
+      // Arm only when it is off. Sending ARM again drops the arm on this board.
+      if(!c.status?.armed) await c.arm()
       const lines=gcode.slice()
-      await c.arm().catch(()=>{})
       for(let i=0;i<lines.length;i++){
         while(pauseRef.current){ await new Promise(r=>setTimeout(r,100)); if(!serial.ready) throw new Error('Link lost') }
         if(!serial.ready) throw new Error('Not connected')
-        // stream one line via public API
         await c.streamGcode([lines[i]],{onProgress:()=>{}})
         setProgress(Math.round(((i+1)/lines.length)*100))
       }
       setNotice('Pattern stream finished (or reached end).')
     }catch(e){
-      // Laser OFF + stop on any failure (firmware also forces the relay off on errors).
-      try{ await c.stop() }catch{}
+      // STOP disarms the motors. Only use it when a move is actually in progress.
+      if(c.status?.state==='moving'){ try{ await c.stop() }catch{} }
+      if(c.ready&&c.status?.state!=='moving'&&!c.status?.armed){ try{ await c.arm() }catch{} }
       setNotice(e instanceof Error?e.message:String(e))
     }finally{
       setStreaming(false); setPaused(false); pauseRef.current=false; setSafetyAck(false)
     }
   }
+
+  const box=workBoxOf(fit)
+  const spanX=Math.round((box.x1-box.x0)*10)/10
+  const spanY=Math.round((box.y1-box.y0)*10)/10
+  const maxSize=maxSizeForLimit(box,fit.marginMm)
+  const canvasW=445
+  const canvasH=Math.max(160,Math.round(canvasW*spanY/Math.max(spanX,1)))
 
   return <section className="card" aria-labelledby="pattern-title">
     <h2 id="pattern-title">Pattern → laser toolpath → G-code</h2>
@@ -151,16 +195,24 @@ export default function PatternPlotter({serial,feed}:{serial:SharedSerial;feed:n
     <p className="notice" role="alert" style={{background:'#fde8e8',border:'2px solid #b52035',color:'#5c0b16',padding:'0.6rem',borderRadius:8}}><strong>⚠ Laser cutting:</strong> wear laser safety goggles rated for the laser wavelength, never leave a running cut unattended (fabric can catch fire), keep an extinguisher and the laser power switch within reach, and ventilate the smoke.</p>
     <div className="actions">
       <button className="btn btn-primary" disabled={busy||streaming} onClick={()=>fileRef.current?.click()}>{busy?'Loading…':'Upload SVG / PNG / JPG'}</button>
+      <button className="btn" disabled={busy||streaming} onClick={()=>void loadSample()}>Try sample SVG</button>
       <input ref={fileRef} hidden type="file" accept=".svg,image/svg+xml,image/png,image/jpeg,image/webp" onChange={e=>{const f=e.target.files?.[0]; e.target.value=''; if(f) void loadFile(f)}}/>
       {savedName?<span>Saved privately as {savedName}</span>:null}
     </div>
     <div className="grid grid-2">
       <div>
-        <label>Target width mm <input type="number" value={fit.targetWidthMm} onChange={e=>setFit({...fit,targetWidthMm:Number(e.target.value)})}/></label>
-        <label>Target height mm <input type="number" value={fit.targetHeightMm} onChange={e=>setFit({...fit,targetHeightMm:Number(e.target.value)})}/></label>
+        <label>Width mm <input type="number" min={1} value={fit.targetWidthMm} onChange={e=>setFit(f=>clampSize(f,'targetWidthMm',Number(e.target.value)))}/></label>
+        <label>Length mm <input type="number" min={1} value={fit.targetHeightMm} onChange={e=>setFit(f=>clampSize(f,'targetHeightMm',Number(e.target.value)))}/></label>
+        <p className="notice">{serial.packet?.soft_limit
+          ? `Saved limit ${spanX} × ${spanY} mm. Width and length are set to the maximum that fits: ${maxSize.targetWidthMm} × ${maxSize.targetHeightMm} mm.`
+          : `No saved limit yet. Width and length use the full bed, maximum ${maxSize.targetWidthMm} × ${maxSize.targetHeightMm} mm.`}</p>
         <label>Offset X mm <input type="number" value={fit.offsetXMm} onChange={e=>setFit({...fit,offsetXMm:Number(e.target.value)})}/></label>
         <label>Offset Y mm <input type="number" value={fit.offsetYMm} onChange={e=>setFit({...fit,offsetYMm:Number(e.target.value)})}/></label>
-        <label>Margin mm <input type="number" value={fit.marginMm} onChange={e=>setFit({...fit,marginMm:Number(e.target.value)})}/></label>
+        <label>Margin mm <input type="number" value={fit.marginMm} onChange={e=>setFit(f=>{
+          const marginMm=Number(e.target.value)
+          const sized=maxSizeForLimit(workBoxOf(f),Number.isFinite(marginMm)?marginMm:f.marginMm)
+          return {...f,marginMm,targetWidthMm:Math.min(f.targetWidthMm,sized.targetWidthMm),targetHeightMm:Math.min(f.targetHeightMm,sized.targetHeightMm)}
+        })}/></label>
         <label>Rotation
           <select value={fit.rotationDeg} onChange={e=>setFit({...fit,rotationDeg:Number(e.target.value) as 0|90})}>
             <option value={0}>0°</option>
@@ -171,7 +223,7 @@ export default function PatternPlotter({serial,feed}:{serial:SharedSerial;feed:n
         <label>Raster threshold <input type="range" min={20} max={220} value={threshold} onChange={e=>setThreshold(Number(e.target.value))}/> {threshold}</label>
       </div>
       <div>
-        <canvas ref={canvasRef} width={445} height={650} style={{width:'100%',maxWidth:320,border:'1px solid #cbd5e1',background:'#fff'}}/>
+        <canvas ref={canvasRef} width={canvasW} height={canvasH} style={{width:'100%',maxWidth:320,height:'auto',border:'1px solid #cbd5e1',background:'#fff'}}/>
         {stats?<p>Laser cut ~{stats.lengthMm.toFixed(1)} mm · travel ~{stats.travelMm.toFixed(1)} mm · est. {(stats.estimateMin).toFixed(1)} min @ {feed} mm/min</p>:null}
         {error?<p role="alert">{error}</p>:null}
         <p>{gcode.length} G-code lines · {notice}</p>

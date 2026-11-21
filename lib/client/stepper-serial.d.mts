@@ -19,8 +19,14 @@ export interface StepperStatus {
   laser_active_low?: boolean
   reason: string
   steps_per_mm?: number
+  x_min?: number
   x_max?: number
+  y_min?: number
   y_max?: number
+  soft_limit?: boolean
+  start_on?: boolean
+  start_x?: number
+  start_y?: number
 }
 export type MotorStatus = StepperStatus
 export interface SerialPortLike {
@@ -39,6 +45,9 @@ export class StepperSerialClient {
   arm(): Promise<StepperStatus>
   stop(): Promise<StepperStatus>
   setOrigin(): Promise<StepperStatus>
+  setLimits(box: { xmin: number; xmax: number; ymin: number; ymax: number } | null): Promise<StepperStatus>
+  setStartPoint(x: number, y: number): Promise<StepperStatus>
+  goStartPoint(feed?: number): Promise<StepperStatus>
   jog(axis: 'X' | 'Y' | string, mm: number, feed?: number): Promise<StepperStatus>
   g1(x: number | null, y: number | null, feed?: number | null): Promise<StepperStatus>
   laserOn(): Promise<StepperStatus>

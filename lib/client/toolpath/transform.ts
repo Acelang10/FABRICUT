@@ -1,22 +1,57 @@
-import type { FitOptions, Polylines } from './types'
+import type { FitOptions, Polylines, WorkBox } from './types'
 import { boundsOf } from './geometry'
 import { WORK_X_MAX_MM, WORK_Y_MAX_MM } from './types'
 
-export function assertInsideWork(polys: Polylines, margin = 0, xMax = WORK_X_MAX_MM, yMax = WORK_Y_MAX_MM) {
+export function machineWorkBox(): WorkBox {
+  return { x0: 0, x1: WORK_X_MAX_MM, y0: 0, y1: WORK_Y_MAX_MM }
+}
+
+function num(v: number | undefined, fallback: number) {
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback
+}
+
+export function workBoxOf(opts: FitOptions): WorkBox {
+  const box = machineWorkBox()
+  return {
+    x0: num(opts.workX0, box.x0),
+    x1: num(opts.workX1, box.x1),
+    y0: num(opts.workY0, box.y0),
+    y1: num(opts.workY1, box.y1),
+  }
+}
+
+/** Largest width (X) and length (Y) that still sit inside the saved limit, after the margin. */
+export function maxSizeForLimit(box: WorkBox, marginMm: number) {
+  const margin = Math.max(0, marginMm)
+  const width = Math.round(Math.max(1, box.x1 - box.x0 - 2 * margin) * 10) / 10
+  const length = Math.round(Math.max(1, box.y1 - box.y0 - 2 * margin) * 10) / 10
+  return { targetWidthMm: width, targetHeightMm: length, offsetXMm: box.x0, offsetYMm: box.y0 }
+}
+
+export function assertInsideWork(
+  polys: Polylines,
+  margin = 0,
+  xMax = WORK_X_MAX_MM,
+  yMax = WORK_Y_MAX_MM,
+  xMin = 0,
+  yMin = 0,
+) {
   const b = boundsOf(polys)
-  if (b.minX < -1e-6 || b.minY < -1e-6 || b.maxX > xMax + 1e-6 || b.maxY > yMax + 1e-6) {
+  const spanX = Math.round((xMax - xMin) * 10) / 10
+  const spanY = Math.round((yMax - yMin) * 10) / 10
+  if (b.minX < xMin - 1e-6 || b.minY < yMin - 1e-6 || b.maxX > xMax + 1e-6 || b.maxY > yMax + 1e-6) {
     throw new Error(
-      `Path exceeds work area (${xMax}×${yMax} mm). Bounds: [${b.minX.toFixed(2)},${b.minY.toFixed(2)}]–[${b.maxX.toFixed(2)},${b.maxY.toFixed(2)}]`,
+      `Path exceeds work area (${spanX}×${spanY} mm). Bounds: [${b.minX.toFixed(2)},${b.minY.toFixed(2)}]–[${b.maxX.toFixed(2)},${b.maxY.toFixed(2)}]`,
     )
   }
   if (margin > 0) {
     if (
-      b.minX < margin - 1e-6 ||
-      b.minY < margin - 1e-6 ||
+      b.minX < xMin + margin - 1e-6 ||
+      b.minY < yMin + margin - 1e-6 ||
       b.maxX > xMax - margin + 1e-6 ||
       b.maxY > yMax - margin + 1e-6
     ) {
-      throw new Error(`Path violates ${margin} mm margin inside ${xMax}×${yMax} mm work area`)
+      throw new Error(`Path violates ${margin} mm margin inside ${spanX}×${spanY} mm work area`)
     }
   }
 }
@@ -73,7 +108,8 @@ export function fitToWork(raw: Polylines, opts: FitOptions): Polylines {
       y: p.y - lb.minY + opts.offsetYMm + margin,
     })),
   )
-  assertInsideWork(out, 0)
-  if (margin > 0) assertInsideWork(out, margin)
+  const box = workBoxOf(opts)
+  assertInsideWork(out, 0, box.x1, box.y1, box.x0, box.y0)
+  if (margin > 0) assertInsideWork(out, margin, box.x1, box.y1, box.x0, box.y0)
   return out
 }
