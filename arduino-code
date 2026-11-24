@@ -61,7 +61,12 @@ static char jobBuf[JOB_MAX_BYTES+1]; // phone-uploaded G-code (RAM, lost on rese
 size_t jobLen=0, jobPos=0, upLen=0;
 uint32_t jobTotalLines=0, jobLineNo=0;
 bool upRefused=false, upOverflow=false, upAborted=false, upGotData=false;
+bool jobUpload=false;          // USB JOBLINE text is stored, not executed
+bool jobUploadBad=false;       // a JOBLINE failed; JOBRUN must not start
+bool storedJob=false;          // file is running from jobBuf; link loss must not stop it
 const char* webJobErr="";
+void beginStoredJob(uint32_t nowMs);
+uint32_t countJobLines(const char* b,size_t n);
 
 // ---- Phone controller (Wi-Fi AP + web page) ----
 WebServer web(80);
@@ -187,7 +192,7 @@ size_t statusJson(char* buf,size_t n,uint32_t ack){
     armLeft=idle<motion.leaseMs?motion.leaseMs-idle:0;
   }
   int len=snprintf(buf,n,
-    "{\"v\":%d,\"session\":%lu,\"ack\":%lu,\"mode\":\"" STEPPER_LASER "\",\"state\":\"%s\",\"armed\":%s,"
+    "{\"v\":%d,\"session\":%lu,\"ack\":%lu,\"mode\":\"STEPPER_LASER\",\"state\":\"%s\",\"armed\":%s,"
     "\"x\":%.3f,\"y\":%.3f,\"feed\":%lu,\"coils\":\"%s\",\"laser\":\"%s\",\"laser_latched\":%s,"
     "\"laser_pin\":%u,\"laser_active_low\":%s,\"reason\":\"%s\","
     "\"steps_per_mm\":%.2f,\"x_min\":%.1f,\"x_max\":%.1f,\"y_min\":%.1f,\"y_max\":%.1f,\"soft_limit\":%s,"
@@ -202,8 +207,8 @@ size_t statusJson(char* buf,size_t n,uint32_t ack){
     motion.coilsOn?"on":"off",motion.laser.on?"on":"off",motion.laserLatched?"true":"false",
     (unsigned)LASER_RELAY_PIN,LASER_RELAY_ACTIVE_LOW?"true":"false",reasonName(),
     STEPS_PER_MM_XY,
-    softLimitOn?limX0:0.f, softLimitOn?limX1:X_MAX_MM,
-    softLimitOn?limY0:0.f, softLimitOn?limY1:Y_MAX_MM,
+    softLimitOn?limX0:0.f, softLimitOn?limX1:0.f,
+    softLimitOn?limY0:0.f, softLimitOn?limY1:0.f,
     softLimitOn?"true":"false",
     (long)motion.xSteps,(long)motion.ySteps,motion.x2Invert?"true":"false",motion.xInvert?"true":"false",
     motion.testActive?"running":"idle",(unsigned long)motion.testLegsLeft,
@@ -302,6 +307,7 @@ void handleLine(char* line){
 
   if(count==1 && (!strcasecmp(tokens[0],"STOP") || !strcmp(tokens[0],"!") || !strcasecmp(tokens[0],"M0") ||
                   !strcasecmp(tokens[0],"DISARM"))){
+    storedJob=false; jobUpload=false;
     motion.stop(Reason::Stop); status(ack); return;
   }
   if(count==1 && !strcasecmp(tokens[0],"STATUS")){ status(ack); return; }
@@ -440,10 +446,13 @@ void handleLine(char* line){
     if(motion.busy()){ fail(Reason::Busy); return; }
     motion.laserOff(); motion.setOrigin(); status(ack); return;
   }
-  // M3 [Sxxx] = tool on. TOOL_DRY (default): status only, relay stays OFF.
-  // TOOL_LASER: laser relay enable (fires only during G1). S is ignored: relay has no power control.
+  // M3 closes the relay immediately while the machine is idle, so Laser ON can
+  // be tested without a cut. G0, jog, and motor tests open it. M5 opens it.
+  // S is ignored: the relay has no power control.
   if(count>=1 && (!strcasecmp(tokens[0],"M3") || !strcasecmp(tokens[0],"M4") || !strcasecmp(tokens[0],"LASERON"))){
-    motion.toolCmd(true,nowMs); status(ack); return;
+    motion.toolCmd(true,nowMs);
+    if(motion.laserLatched && !motion.busy()) motion.laser.set(true);
+    status(ack); return;
   }
   // M5 = laser relay OFF. PENUP/ZUP kept as harmless aliases for old clients.
   if(count>=1 && (!strcasecmp(tokens[0],"M5") || !strcasecmp(tokens[0],"LASEROFF") ||
@@ -546,11 +555,64 @@ void handleLine(char* line){
     activeFeed=f; motion.reason=Reason::Ok; status(ack); return;
   }
 
+  // Stored file: JOBUP, then one JOBLINE per G-code line, JOBEND, then JOBRUN.
+  // JOBRUN clears the arm lease. The file then runs with no host traffic.
+  if(count==1 && !strcasecmp(tokens[0],"JOBUP")){
+    if(job.running() || motion.busy() || usbPending || storedJob){
+      motion.reason=Reason::Busy; status(ack); return;
+    }
+    jobLen=0; jobBuf[0]=0; jobTotalLines=0; jobPos=0; jobLineNo=0;
+    jobUpload=true; jobUploadBad=false; webJobErr="";
+    motion.reason=Reason::Ok; status(ack); return;
+  }
+  if(!strcasecmp(tokens[0],"JOBLINE")){
+    if(!jobUpload || jobUploadBad){ motion.reason=Reason::BadCommand; status(ack); return; }
+    char stored[JOB_MAX_LINE+1];
+    size_t n=0; bool tooLong=false;
+    for(unsigned i=1;i<count;i++){
+      size_t L=strlen(tokens[i]);
+      size_t need=L+(n?1:0);
+      if(n+need>JOB_MAX_LINE){ tooLong=true; break; }
+      if(n) stored[n++]=' ';
+      memcpy(stored+n,tokens[i],L); n+=L;
+    }
+    stored[n]=0;
+    if(tooLong || !n || jobLen+n+1>JOB_MAX_BYTES){
+      jobUploadBad=true;
+      webJobErr=tooLong||!n?"line_too_long":"too_large";
+      motion.reason=Reason::BadCommand; status(ack); return;
+    }
+    memcpy(jobBuf+jobLen,stored,n); jobLen+=n;
+    jobBuf[jobLen++]='\n'; jobBuf[jobLen]=0;
+    motion.reason=Reason::Ok; status(ack); return;
+  }
+  if(count==1 && !strcasecmp(tokens[0],"JOBEND")){
+    if(!jobUpload){ motion.reason=Reason::BadCommand; status(ack); return; }
+    jobUpload=false;
+    if(jobUploadBad || !jobLen){
+      const char* why=jobUploadBad?(webJobErr[0]?webJobErr:"bad_line"):"empty";
+      jobLen=0; jobBuf[0]=0; jobTotalLines=0; jobPos=0; jobLineNo=0;
+      webJobErr=why;
+      motion.reason=Reason::BadCommand; status(ack); return;
+    }
+    jobTotalLines=countJobLines(jobBuf,jobLen);
+    jobPos=0; jobLineNo=0; webJobErr="";
+    motion.reason=Reason::Ok; status(ack); return;
+  }
+  if(count==1 && !strcasecmp(tokens[0],"JOBRUN")){
+    if(jobUpload || jobUploadBad || !jobLen){ motion.reason=Reason::BadCommand; status(ack); return; }
+    if(REQUIRE_ARM && !motion.armed){ fail(Reason::NotArmed); return; }
+    if(motion.busy() || job.running() || usbPending || storedJob){ fail(Reason::Busy); return; }
+    beginStoredJob(nowMs);
+    status(ack); return;
+  }
+
   fail(Reason::BadCommand);
 }
 
 // ================= G-code jobs =================
 void emergencyStop(){
+  storedJob=false; jobUpload=false;
   motion.stop(Reason::Stop);   // laser/tool OFF, coils OFF, disarmed; job.tick() marks the job aborted
   webMotion=false;
   status(lastSeq);
@@ -578,10 +640,20 @@ uint32_t countJobLines(const char* b,size_t n){
   return lines;
 }
 
-// Feed the phone-uploaded file to the job runner, one line per finished move.
+// Run a file already stored in jobBuf. No host traffic is required after this.
+void beginStoredJob(uint32_t nowMs){
+  jobPos=0; jobLineNo=0;
+  webMotion=false; webJobErr="";
+  storedJob=true;
+  motion.ping(nowMs);
+  job.begin(motion,JobSource::Web,nowMs);
+  motion.leaseMs=0; // silence must not expire the arm mid-cut
+}
+
+// Feed a stored file (USB JOBRUN or phone upload) one line per finished move.
 void webJobService(){
-  if(!(job.running() && job.source==JobSource::Web)) return;
-  for(unsigned budget=0; budget<8 && job.running() && !motion.busy(); ++budget){
+  if(!storedJob || !job.running()) return;
+  for(unsigned budget=0; budget<8 && storedJob && job.running() && !motion.busy(); ++budget){
     if(jobPos>=jobLen){ job.finish(motion,"end"); status(lastSeq); return; }
     char line[JOB_MAX_LINE+1]; size_t n=0; bool tooLong=false;
     while(jobPos<jobLen && jobBuf[jobPos]!='\n'){
@@ -664,10 +736,8 @@ void webJobStart(){
   if(!jobLen){ webJobReply(400,"no_job"); return; }
   if(REQUIRE_ARM && !motion.armed){ webJobReply(409,"not_armed"); return; }
   if(motion.busy() || job.running() || usbPending){ webJobReply(409,"busy"); return; }
-  webJobErr="";
-  jobPos=0; jobLineNo=0;
-  webMotion=false;              // the job uses its own phone dead-man (WEB_JOB_DEADMAN_MS)
-  job.begin(motion,JobSource::Web,millis());
+  if(jobUpload){ webJobReply(409,"uploading"); return; }
+  beginStoredJob(millis());
   status(lastSeq);
   webSendStatus();
 }
@@ -686,6 +756,7 @@ void webSendStatus(){
 
 void webStop(){ // always allowed, no session/arm needed, non-blocking
   lastWebSeenMs=millis();
+  storedJob=false; jobUpload=false;
   motion.stop(Reason::Stop);
   webMotion=false;
   status(lastSeq);
@@ -797,11 +868,7 @@ void webService(uint32_t nowMs){
   wifiWatchdog(nowMs);
   dns.processNextRequest();
   web.handleClient();
-  if(job.running() && job.source==JobSource::Web &&
-     webJobDeadmanTrip(true,millis(),lastWebSeenMs)){
-    motion.stop(Reason::Lease); // phone stopped polling during a job -> abort, tool OFF
-    status(lastSeq);
-  }
+  // A file already in jobBuf keeps cutting if the phone stops polling.
   if(webMotion){
     if(!motion.busy()) webMotion=false;
     else if(webDeadmanTrip(webMotion,motion.busy(),millis(),lastWebSeenMs)){
@@ -826,9 +893,25 @@ void setupWatchdog(){
   esp_task_wdt_add(NULL);
 }
 
+// A 5V active-low module stays closed on an ESP32 3.3 V HIGH. Leave the pin
+// floating so the module's own pull-up opens the coil. A latched M3 keeps the
+// coil closed while the head is still; travel clears that in the motion core.
+void releaseIdleRelay(){
+  if(motion.laser.on || (motion.laserLatched && !motion.busy())) return;
+  if(LASER_RELAY_ACTIVE_LOW){
+    digitalWrite(LASER_RELAY_PIN, HIGH);
+    pinMode(LASER_RELAY_PIN, INPUT);
+  } else {
+    pinMode(LASER_RELAY_PIN, OUTPUT);
+    digitalWrite(LASER_RELAY_PIN, LOW);
+  }
+}
+
 void setup(){
   // Relay OFF before anything else. Keep laser 12V and motor 5V supplies OFF while flashing.
+  releaseIdleRelay();
   motion.begin();
+  releaseIdleRelay();
   Serial.setTxBufferSize(2048); // status lines never block the step loop
   Serial.begin(115200);
   recordBoot();
@@ -842,11 +925,21 @@ void loop(){
   esp_task_wdt_reset();
   uint32_t nowMs=millis();
   uint32_t nowUs=micros();
+  if(storedJob) motion.leaseMs=0; // a missing STATUS must not stop this file
   motion.tick(nowMs,nowUs);
   webService(nowMs);
   motion.tick(millis(),micros());
+  // Keep a latched Laser ON closed while the head is still. Travel sets busy
+  // and the motion core opens the coil for that move.
+  if(motion.laserLatched && motion.armed && !motion.busy()) motion.laser.set(true);
+  releaseIdleRelay();
 
   job.tick(motion,millis());
+  if(storedJob && !job.running()){
+    storedJob=false;
+    motion.leaseMs=HEARTBEAT_LEASE_MS; // arm timeout applies again only after the file ends
+    motion.ping(millis());
+  }
   if(usbPending && !motion.busy()){
     usbPending=false;
     Serial.print(job.running()?"ok\n":"error:aborted\n"); // reply for the finished (or stopped) move
@@ -879,7 +972,8 @@ void loop(){
     } else if(ch<32 || ch>126 || used>=sizeof(inputLine)-1){
       if(!discardLine){
         discardWhy=(ch<32 || ch>126)?"bad_char":"line_too_long";
-        motion.stop(Reason::BadCommand); status(lastSeq);
+        // Garbled bytes must not abort a file already stored, or an upload still in progress.
+        if(!storedJob && !jobUpload){ motion.stop(Reason::BadCommand); status(lastSeq); }
       }
       discardLine=true; used=0;
     } else if(!discardLine){

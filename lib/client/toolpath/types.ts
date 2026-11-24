@@ -16,7 +16,9 @@ export type FitOptions = {
   keepAspect: boolean
   marginMm: number
   flipY?: boolean // SVG y-down -> machine y-up style if needed; default flip for SVG
-  /** Saved work box. Width and length are fitted inside it. Defaults to 0..bed. */
+  /** False means Limits off: no soft box, including the full bed. */
+  limitOn?: boolean
+  /** Saved work box. Used only while limitOn is true. */
   workX0?: number
   workX1?: number
   workY0?: number

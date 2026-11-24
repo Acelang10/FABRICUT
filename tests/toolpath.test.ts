@@ -56,6 +56,14 @@ test('fitToWork scales into 444.5 x 650 and rejects overflow', () => {
   )
 })
 
+test('limits off does not keep the bed as a soft limit', () => {
+  const raw = [[{ x: 0, y: 0 }, { x: 900, y: 0 }, { x: 900, y: 900 }, { x: 0, y: 900 }, { x: 0, y: 0 }]]
+  const fitted = fitToWork(raw, { ...defaultFitOptions(), limitOn: false, targetWidthMm: 900, targetHeightMm: 900, marginMm: 0, keepAspect: false })
+  const b = pathStats(fitted).bounds
+  assert.ok(b.maxX > WORK_X_MAX_MM)
+  assert.ok(b.maxY > WORK_Y_MAX_MM)
+})
+
 test('saved limit sets the maximum width and length', () => {
   const box = { x0: 10, x1: 110, y0: -20, y1: 180 }
   const max = maxSizeForLimit(box, 10)
@@ -80,6 +88,26 @@ test('saved limit sets the maximum width and length', () => {
   assert.ok(b.maxY - b.minY <= max.targetHeightMm + 1e-6)
 })
 
+test('travel into a limit box does not command points outside it', () => {
+  const polys = [[{ x: 120, y: 20 }, { x: 150, y: 20 }]]
+  const lines = polylinesToGcode(polys, {
+    feed: 200,
+    from: { x: 0, y: 0 },
+    limit: { x0: 100, x1: 200, y0: 0, y1: 80 },
+  })
+  const travels = lines.filter((l) => l.startsWith('G0 '))
+  assert.ok(travels.length >= 1)
+  for (const l of travels) {
+    const x = Number(/X(-?\d+(?:\.\d+)?)/.exec(l)?.[1])
+    const y = Number(/Y(-?\d+(?:\.\d+)?)/.exec(l)?.[1])
+    assert.ok(x >= 100 && x <= 200, l)
+    assert.ok(y >= 0 && y <= 80, l)
+  }
+  assert.equal(lines[0], 'M5')
+  assert.equal(lines.at(-1), 'M5')
+  assert.equal(lines.some((l) => /G0 X0\.000/.test(l)), false)
+})
+
 test('G-code uses G0/G1/M3/M5 matching firmware subset', () => {
   const polys = [[{ x: 1, y: 2 }, { x: 3, y: 4 }]]
   const lines = polylinesToGcode(polys, { feed: 200 })
@@ -94,14 +122,17 @@ test('G-code uses G0/G1/M3/M5 matching firmware subset', () => {
   assert.match(lines.find((l) => l.startsWith('G1 ')) || '', /F200/)
 })
 
-test('laser G-code: M5 before every G0, M3 only before G1 runs, no Z, ends with M5', () => {
+test('laser G-code: M5 before every G0, M3 only before G1 runs, no Z, returns to start', () => {
   const polys = [
     [{ x: 1, y: 2 }, { x: 3, y: 4 }, { x: 5, y: 4 }],
     [{ x: 10, y: 10 }, { x: 20, y: 10 }],
   ]
-  const lines = polylinesToGcode(polys, { feed: 200 })
+  const lines = polylinesToGcode(polys, { feed: 200, from: { x: 0, y: 0 } })
   assert.ok(lines.every((l) => !/\bZ/.test(l)), 'no Z words')
-  assert.equal(lines.at(-1), 'M5')
+  const lastM5 = lines.lastIndexOf('M5')
+  assert.ok(lastM5 >= 0 && lastM5 < lines.length - 1)
+  assert.ok(lines.slice(lastM5 + 1).every((l) => l.startsWith('G0 ')))
+  assert.equal(lines.at(-1), 'G0 X0.000 Y0.000 F200')
   let laser = false
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i]
@@ -111,6 +142,11 @@ test('laser G-code: M5 before every G0, M3 only before G1 runs, no Z, ends with 
     if (l.startsWith('G1 ')) assert.equal(laser, true, `cut with laser off at line ${i}: ${l}`)
   }
   assert.equal(lines.filter((l) => l === 'M3').length, 2)
+})
+
+test('no return move when the cut already ends at the start', () => {
+  const lines = polylinesToGcode([[{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 0 }]], { feed: 200, from: { x: 0, y: 0 } })
+  assert.equal(lines.at(-1), 'M5')
 })
 
 test('long moves are split under the 40 mm firmware step limit', () => {
@@ -128,5 +164,6 @@ test('long moves are split under the 40 mm firmware step limit', () => {
     x = nx
     y = ny
   }
-  assert.ok(Math.abs(y - 373) < 0.01)
+  assert.ok(moves.some((l) => /Y373\.000/.test(l)))
+  assert.ok(Math.abs(x) < 0.01 && Math.abs(y) < 0.01)
 })

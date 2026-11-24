@@ -155,7 +155,7 @@ export default function LocalControllerView({remote=false}:{remote?:boolean}={})
           <h1>Local Controller</h1>
           <p>X-axis test for the ESP32 cutter (X1 + X2 mirrored, Y stays off).{remote?' The Wi-Fi proxy on this live site cannot reach the machine.':' Only shown on this computer unless LOCAL_CONTROLLER=on.'}</p>
         </div>
-        <Link href="/admin/control" className="atelier-btn atelier-btn-ghost atelier-btn-sm">Laser pattern cutter (advanced) →</Link>
+        <Link href="/admin/control" className="atelier-btn atelier-btn-ghost atelier-btn-sm">← Laser pattern cutter (advanced)</Link>
       </div>
 
       {remote?(

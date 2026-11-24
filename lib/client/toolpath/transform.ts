@@ -108,6 +108,7 @@ export function fitToWork(raw: Polylines, opts: FitOptions): Polylines {
       y: p.y - lb.minY + opts.offsetYMm + margin,
     })),
   )
+  if (opts.limitOn === false) return out
   const box = workBoxOf(opts)
   assertInsideWork(out, 0, box.x1, box.y1, box.x0, box.y0)
   if (margin > 0) assertInsideWork(out, margin, box.x1, box.y1, box.x0, box.y0)

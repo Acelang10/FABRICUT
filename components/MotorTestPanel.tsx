@@ -19,6 +19,7 @@ export default function MotorTestPanel(){
   const [feed,setFeed]=useState('200')
   const [lim,setLim]=useState({xmin:'-200',xmax:'444.5',ymin:'-200',ymax:'650'})
   const [startPt,setStartPt]=useState({x:'',y:''})
+  const [laserAck,setLaserAck]=useState(false)
   const limFocus=useRef(false)
   const startFocus=useRef(false)
   const [, bump]=useState(0)
@@ -38,14 +39,21 @@ export default function MotorTestPanel(){
     client.current=instance
     bump(n=>n+1)
     setSupported(!!serialApi()&&window.isSecureContext)
-    const stopBestEffort=()=>{void instance.stop().catch(()=>{})}
-    const visibility=()=>{if(document.hidden)stopBestEffort()}
-    const lost=()=>{setLinked(false);setPacket(null);setNotice('USB disconnected: physical state UNKNOWN. Use independent E-stop if needed.');void instance.disconnect(false)}
+    const cutting=()=>instance.localJob||instance.linkHold||instance.status?.state==='moving'
+    const stopBestEffort=()=>{ if(instance.localJob) return; void instance.stop().catch(()=>{}) }
+    const visibility=()=>{if(document.hidden&&!cutting())stopBestEffort()}
+    const lost=()=>{
+      if(instance.localJob){
+        setNotice('USB link changed. The cut keeps running on the machine until the file ends.')
+        return
+      }
+      setLinked(false);setPacket(null);setNotice('USB disconnected: physical state UNKNOWN. Use independent E-stop if needed.');void instance.disconnect(false)
+    }
     window.addEventListener('pagehide',stopBestEffort)
     document.addEventListener('visibilitychange',visibility)
     serialApi()?.addEventListener('disconnect',lost)
     const permissionTimer=window.setInterval(()=>{
-      if(instance.ready) void assertStaff().catch(error=>{
+      if(instance.ready&&!instance.localJob&&!instance.linkHold&&instance.status?.state!=='moving') void assertStaff().catch(error=>{
         setNotice(error instanceof Error?error.message:'Staff authorization unavailable')
         setLinked(false);setPacket(null);void instance.disconnect()
       })
@@ -93,6 +101,10 @@ export default function MotorTestPanel(){
   }
 
   async function disconnect(){
+    if(client.current?.localJob){
+      setNotice('A cut is running on the machine. Disconnect will not stop it. Press STOP to abort.')
+      return
+    }
     await client.current?.disconnect()
     setLinked(false);setPacket(null)
     setNotice('USB closed.')
@@ -119,8 +131,8 @@ export default function MotorTestPanel(){
           <li>Keep a physical switch on the laser 12V supply within reach. Software STOP is not an E-stop.</li>
         </ul>
       </div>
-      <p className="notice"><strong>{!packet?'NO DEVICE TELEMETRY':`LASER ${packet.laser.toUpperCase()}${packet.laser_latched?' (M3 enabled)':''} · coils ${packet.coils||'?'} · relay GPIO${packet.laser_pin??26} · work ~${packet.x_max||444.5}×${packet.y_max||650} mm`}</strong><br/>
-      Protocol v3 (F2). The laser relay only closes during G1 cutting moves after M3, and turns off on G0 travel, M5, STOP, errors and USB loss. Relay ON/OFF only — no power (PWM) control. Soft limits are uncalibrated. Keep the 5V motor PSU and laser 12V supply off while flashing.</p>
+      <p className="notice"><strong>{!packet?'NO DEVICE TELEMETRY':`LASER ${packet.laser.toUpperCase()}${packet.laser_latched?' (M3 enabled)':''} · coils ${packet.coils||'?'} · relay GPIO${packet.laser_pin??26} · ${packet.soft_limit?`work ${packet.x_min} to ${packet.x_max} by ${packet.y_min} to ${packet.y_max} mm`:'soft limit off'}`}</strong><br/>
+      Protocol v3 (F2). The laser relay only closes during G1 cutting moves after M3, and turns off on G0 travel, M5, STOP, and errors. A G-code file stored on the board keeps cutting if USB blips. Relay ON/OFF only — no power (PWM) control. Keep the 5V motor PSU and laser 12V supply off while flashing.</p>
       {!supported?<p role="alert">Web Serial requires desktop Chrome/Edge on localhost or HTTPS. No backend opens a serial port.</p>:null}
       <div className="actions">
         <button className="btn btn-primary" disabled={!supported||ready||busy} onClick={()=>void action(connect)}>Connect USB</button>
@@ -141,9 +153,9 @@ export default function MotorTestPanel(){
             await client.current!.jog(axis, Number(jogMm)*sign, Number(feed))
           })}>{label}</button>
         )}
-        <button className="btn" disabled={!canJog} title="M3: enables the laser; the relay closes only during G1 cutting moves" onClick={()=>void action(async()=>{
+        <label><input type="checkbox" checked={laserAck} disabled={!ready} onChange={e=>setLaserAck(e.target.checked)}/> Goggles on, fabric supervised</label>
+        <button className="btn" disabled={!canJog||!laserAck} title="M3: enables the laser; the relay closes only during G1 cutting moves" onClick={()=>void action(async()=>{
           await assertStaff()
-          if(!window.confirm('Enable the LASER (M3)? Everyone must be wearing laser safety goggles, and the fabric must be supervised.')) return
           await client.current!.laserOn()
         })}>Laser ON (M3)</button>
         <button className="btn" disabled={!linked} onClick={()=>void action(()=>client.current!.laserOff())}>Laser OFF (M5)</button>
@@ -189,7 +201,7 @@ export default function MotorTestPanel(){
         })}>Apply limits</button>
         <span>{packet?.soft_limit===true
           ? `On the ESP: ${packet.x_min} to ${packet.x_max} by ${packet.y_min} to ${packet.y_max} mm. Kept after reset or unplug.`
-          : packet?'Limits off on the ESP.':''}</span>
+          : packet?'Soft limit off. Moves are not stopped at a box.':''}</span>
       </div>
       <p role="status">{notice}</p>
       <div className="stats-grid">
