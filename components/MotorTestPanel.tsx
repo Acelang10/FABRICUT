@@ -132,7 +132,7 @@ export default function MotorTestPanel(){
         </ul>
       </div>
       <p className="notice"><strong>{!packet?'NO DEVICE TELEMETRY':`LASER ${packet.laser.toUpperCase()}${packet.laser_latched?' (M3 enabled)':''} · coils ${packet.coils||'?'} · relay GPIO${packet.laser_pin??26} · ${packet.soft_limit?`work ${packet.x_min} to ${packet.x_max} by ${packet.y_min} to ${packet.y_max} mm`:'soft limit off'}`}</strong><br/>
-      Protocol v3 (F2). The laser relay only closes during G1 cutting moves after M3, and turns off on G0 travel, M5, STOP, and errors. A G-code file stored on the board keeps cutting if USB blips. Relay ON/OFF only — no power (PWM) control. Keep the 5V motor PSU and laser 12V supply off while flashing.</p>
+      Protocol v3 (F2). Laser ON (M3) closes the relay while the machine is idle, so the switch can be tested without a cut. Travel, M5, STOP, and errors open it. A G-code file stored on the board keeps cutting if USB blips. Relay ON/OFF only — no power (PWM) control. Keep the 5V motor PSU and laser 12V supply off while flashing.</p>
       {!supported?<p role="alert">Web Serial requires desktop Chrome/Edge on localhost or HTTPS. No backend opens a serial port.</p>:null}
       <div className="actions">
         <button className="btn btn-primary" disabled={!supported||ready||busy} onClick={()=>void action(connect)}>Connect USB</button>

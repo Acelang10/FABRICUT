@@ -36,6 +36,12 @@ constexpr uint32_t MCU_WDT_TIMEOUT_MS = 3000; // firmware hang -> reset -> relay
 
 using namespace fabricut;
 Planner motion;
+// Set by Laser ON (M3). Holds the relay closed while the head is still,
+// even if the motion core only wanted it during a G1 cut.
+bool relayHold=false;
+void driveRelayPin(bool energize);
+void releaseIdleRelay();
+void applyRelayHold();
 
 char inputLine[JOB_MAX_LINE+1];
 unsigned used=0;
@@ -278,7 +284,7 @@ void handleLine(char* line){
   if(!count) return;
 
   // Any rejected command forces the laser OFF.
-  auto fail=[&](Reason r){ motion.reject(r); status(lastSeq); };
+  auto fail=[&](Reason r){ relayHold=false; motion.reject(r); releaseIdleRelay(); status(lastSeq); };
 
   if(!strcmp(tokens[0],"F2")){
     uint32_t seq=0;
@@ -451,13 +457,15 @@ void handleLine(char* line){
   // S is ignored: the relay has no power control.
   if(count>=1 && (!strcasecmp(tokens[0],"M3") || !strcasecmp(tokens[0],"M4") || !strcasecmp(tokens[0],"LASERON"))){
     motion.toolCmd(true,nowMs);
-    if(motion.laserLatched && !motion.busy()) motion.laser.set(true);
+    relayHold=true;
+    if(!motion.busy()) applyRelayHold();
     status(ack); return;
   }
   // M5 = laser relay OFF. PENUP/ZUP kept as harmless aliases for old clients.
   if(count>=1 && (!strcasecmp(tokens[0],"M5") || !strcasecmp(tokens[0],"LASEROFF") ||
                   !strcasecmp(tokens[0],"PENUP") || !strcasecmp(tokens[0],"ZUP"))){
-    motion.laserOff(); motion.reason=Reason::LaserOff; status(ack); return;
+    relayHold=false;
+    motion.laserOff(); releaseIdleRelay(); motion.reason=Reason::LaserOff; status(ack); return;
   }
 
   // LIMIT OFF  or  LIMIT <xmin> <xmax> <ymin> <ymax>   (millimetres, from the website)
@@ -612,8 +620,10 @@ void handleLine(char* line){
 
 // ================= G-code jobs =================
 void emergencyStop(){
+  relayHold=false;
   storedJob=false; jobUpload=false;
   motion.stop(Reason::Stop);   // laser/tool OFF, coils OFF, disarmed; job.tick() marks the job aborted
+  releaseIdleRelay();
   webMotion=false;
   status(lastSeq);
 }
@@ -756,8 +766,10 @@ void webSendStatus(){
 
 void webStop(){ // always allowed, no session/arm needed, non-blocking
   lastWebSeenMs=millis();
+  relayHold=false;
   storedJob=false; jobUpload=false;
   motion.stop(Reason::Stop);
+  releaseIdleRelay();
   webMotion=false;
   status(lastSeq);
   webSendStatus();
@@ -893,18 +905,36 @@ void setupWatchdog(){
   esp_task_wdt_add(NULL);
 }
 
-// A 5V active-low module stays closed on an ESP32 3.3 V HIGH. Leave the pin
-// floating so the module's own pull-up opens the coil. A latched M3 keeps the
-// coil closed while the head is still; travel clears that in the motion core.
-void releaseIdleRelay(){
-  if(motion.laser.on || (motion.laserLatched && !motion.busy())) return;
-  if(LASER_RELAY_ACTIVE_LOW){
-    digitalWrite(LASER_RELAY_PIN, HIGH);
-    pinMode(LASER_RELAY_PIN, INPUT);
-  } else {
+// Active-low: GPIO LOW closes the coil. Releasing the pin lets the module's
+// 5V pull-up open it. Active-high modules are driven the other way.
+void driveRelayPin(bool energize){
+  if(energize){
     pinMode(LASER_RELAY_PIN, OUTPUT);
-    digitalWrite(LASER_RELAY_PIN, LOW);
+    digitalWrite(LASER_RELAY_PIN, LASER_RELAY_ACTIVE_LOW ? LOW : HIGH);
+    motion.laser.set(true);
+  } else {
+    motion.laser.off();
+    if(LASER_RELAY_ACTIVE_LOW){
+      digitalWrite(LASER_RELAY_PIN, HIGH);
+      pinMode(LASER_RELAY_PIN, INPUT);
+    } else {
+      pinMode(LASER_RELAY_PIN, OUTPUT);
+      digitalWrite(LASER_RELAY_PIN, LOW);
+    }
   }
+}
+
+// Open the coil unless Laser ON is holding it and the head is not traveling.
+void releaseIdleRelay(){
+  if(relayHold && motion.armed && !motion.busy()) return;
+  if(motion.laser.on && motion.busy()) return;
+  driveRelayPin(false);
+}
+
+// Close the coil for a latched Laser ON while the machine is idle.
+void applyRelayHold(){
+  if(!relayHold || !motion.armed || motion.busy()) return;
+  driveRelayPin(true);
 }
 
 void setup(){
@@ -929,10 +959,12 @@ void loop(){
   motion.tick(nowMs,nowUs);
   webService(nowMs);
   motion.tick(millis(),micros());
-  // Keep a latched Laser ON closed while the head is still. Travel sets busy
-  // and the motion core opens the coil for that move.
-  if(motion.laserLatched && motion.armed && !motion.busy()) motion.laser.set(true);
-  releaseIdleRelay();
+  // STOP and a lost arm clear the hold. Otherwise Laser ON drives the coil
+  // again after tick, which used to leave the status at laser_on with the
+  // relay open until a G1.
+  if(!motion.armed) relayHold=false;
+  if(relayHold) applyRelayHold();
+  else releaseIdleRelay();
 
   job.tick(motion,millis());
   if(storedJob && !job.running()){
