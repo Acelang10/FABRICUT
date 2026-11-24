@@ -9,5 +9,6 @@ const baseTabs:[string,string][]=[
 
 export function adminTabs(localController:boolean):[string,string][]{
   // The machine controller appears on localhost, or on Vercel when LOCAL_CONTROLLER=on.
-  return localController?[...baseTabs,['/admin/local-controller','Local Controller']]:baseTabs
+  // The tab opens the advanced laser cutter.
+  return localController?[...baseTabs,['/admin/control','Local Controller']]:baseTabs
 }

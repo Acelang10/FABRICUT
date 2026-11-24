@@ -61,7 +61,7 @@ test('local controller is enabled on localhost, or on Vercel when LOCAL_CONTROLL
   assert.equal(localControllerIsRemote({VERCEL_ENV: 'production'}), true)
   assert.equal(localControllerIsRemote({}), false)
   assert.deepEqual(adminTabs(false).map(t => t[1]).includes('Local Controller'), false)
-  assert.deepEqual(adminTabs(true).at(-1), ['/admin/local-controller', 'Local Controller'])
+  assert.deepEqual(adminTabs(true).at(-1), ['/admin/control', 'Local Controller'])
   assert.equal(adminTabs(false).some(t => t[1] === 'Production'), true)
 })
 

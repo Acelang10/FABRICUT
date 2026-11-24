@@ -40,6 +40,7 @@ export default function AdminShell({children,localController=false}:{children:Re
 
   function active(href:string){
     if(href==='/admin') return pathname==='/admin'
+    if(href==='/admin/control') return pathname==='/admin/control'||pathname.startsWith('/admin/local-controller')
     return pathname===href||pathname.startsWith(href+'/')
   }
 
