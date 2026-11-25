@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Yoke, collar combination, and sleeve on one sheet. Closed cut outlines only. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="640" viewBox="0 0 900 640">
+  <g id="yoke">
+    <path fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"
+      d="M 24 86
+         L 78 40
+         Q 140 18 210 52
+         Q 280 18 342 40
+         L 396 86
+         L 396 156
+         L 24 156
+         Z"/>
+    <path fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"
+      d="M 24 172 L 396 172 L 396 196 L 24 196 Z"/>
+  </g>
+  <g id="collar" transform="translate(460,16)">
+    <path fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"
+      d="M 78 36
+         Q 220 54 362 36
+         L 412 108
+         Q 220 128 28 108
+         Z"/>
+    <path fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"
+      d="M 96 168
+         Q 220 146 344 168
+         C 372 178 372 198 344 208
+         Q 220 196 96 208
+         C 68 198 68 178 96 168
+         Z"/>
+  </g>
+  <g id="sleeve" transform="translate(40,230)">
+    <path fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"
+      d="M 72 148
+         L 52 176
+         L 36 360
+         L 324 360
+         L 300 196
+         L 276 158
+         C 228 96 176 42 124 32
+         C 72 42 58 100 72 148
+         Z"/>
+  </g>
+</svg>

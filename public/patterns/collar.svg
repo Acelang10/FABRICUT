@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Collar combination: outer collar and collar stand. Closed cut outlines only. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="250" viewBox="0 0 440 250">
+  <path fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"
+    d="M 78 36
+       Q 220 54 362 36
+       L 412 108
+       Q 220 128 28 108
+       Z"/>
+  <path fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"
+    d="M 96 168
+       Q 220 146 344 168
+       C 372 178 372 198 344 208
+       Q 220 196 96 208
+       C 68 198 68 178 96 168
+       Z"/>
+</svg>

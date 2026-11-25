@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Shirt yoke + lower band. Closed cut outlines only. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="210" viewBox="0 0 420 210">
+  <path fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"
+    d="M 24 86
+       L 78 40
+       Q 140 18 210 52
+       Q 280 18 342 40
+       L 396 86
+       L 396 156
+       L 24 156
+       Z"/>
+  <path fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"
+    d="M 24 172 L 396 172 L 396 196 L 24 196 Z"/>
+</svg>
