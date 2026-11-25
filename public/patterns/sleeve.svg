@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- One-piece sleeve. Closed cut outline only. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="400" viewBox="0 0 360 400">
+  <path fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"
+    d="M 72 148
+       L 52 176
+       L 36 360
+       L 324 360
+       L 300 196
+       L 276 158
+       C 228 96 176 42 124 32
+       C 72 42 58 100 72 148
+       Z"/>
+</svg>

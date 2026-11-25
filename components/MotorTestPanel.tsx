@@ -131,7 +131,7 @@ export default function MotorTestPanel(){
           <li>Keep a physical switch on the laser 12V supply within reach. Software STOP is not an E-stop.</li>
         </ul>
       </div>
-      <p className="notice"><strong>{!packet?'NO DEVICE TELEMETRY':`LASER ${packet.laser.toUpperCase()}${packet.laser_latched?' (M3 enabled)':''} · coils ${packet.coils||'?'} · relay GPIO${packet.laser_pin??26} · ${packet.soft_limit?`work ${packet.x_min} to ${packet.x_max} by ${packet.y_min} to ${packet.y_max} mm`:'soft limit off'}`}</strong><br/>
+      <p className="notice"><strong>{!packet?'NO DEVICE TELEMETRY':`LASER ${packet.laser.toUpperCase()}${packet.laser==='on'?'':(packet.laser_latched?' (M3 enabled)':'')} · coils ${packet.coils||'?'} · relay GPIO${packet.laser_pin??26} · ${packet.soft_limit?`work ${packet.x_min} to ${packet.x_max} by ${packet.y_min} to ${packet.y_max} mm`:'soft limit off'}`}</strong><br/>
       Protocol v3 (F2). Laser ON (M3) closes the relay while the machine is idle, so the switch can be tested without a cut. Travel, M5, STOP, and errors open it. A G-code file stored on the board keeps cutting if USB blips. Relay ON/OFF only — no power (PWM) control. Keep the 5V motor PSU and laser 12V supply off while flashing.</p>
       {!supported?<p role="alert">Web Serial requires desktop Chrome/Edge on localhost or HTTPS. No backend opens a serial port.</p>:null}
       <div className="actions">
@@ -206,7 +206,7 @@ export default function MotorTestPanel(){
       <p role="status">{notice}</p>
       <div className="stats-grid">
         <div><strong>Pose (mm)</strong><p>{packet?`${packet.x.toFixed(2)}, ${packet.y.toFixed(2)}`:'Unknown'}</p></div>
-        <div><strong>Laser</strong><p style={laserOn?{color:'#b52035',fontWeight:700}:undefined}>{packet?`${packet.laser.toUpperCase()}${packet.laser_latched?' · M3 enabled':''}`:'Unknown'}</p></div>
+        <div><strong>Laser</strong><p style={laserOn?{color:'#b52035',fontWeight:700}:undefined}>{packet?`${packet.laser.toUpperCase()}${packet.laser==='on'?'':(packet.laser_latched?' · M3 enabled':'')}`:'Unknown'}</p></div>
         <div><strong>State</strong><p>{packet?`${packet.state} / armed=${packet.armed}`:'Unknown'}</p></div>
         <div><strong>Reason</strong><p>{packet?.reason||'—'}</p></div>
         <div><strong>Feed</strong><p>{packet?.feed??feed}</p></div>

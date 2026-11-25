@@ -36,12 +36,22 @@ constexpr uint32_t MCU_WDT_TIMEOUT_MS = 3000; // firmware hang -> reset -> relay
 
 using namespace fabricut;
 Planner motion;
-// Set by Laser ON (M3). Holds the relay closed while the head is still,
-// even if the motion core only wanted it during a G1 cut.
-bool relayHold=false;
+// Set by the Laser ON button. Holds the relay closed while the head is still.
+bool relayHold=false; // Laser button only. A pattern cut must not use this hold.
+// True after this sketch has driven the coil closed. Starts true so the first
+// off actually releases GPIO26 — the pin can power up holding an active-low relay on.
+bool coilClosed=true;
+// Set by a job M3/M4. The coil stays open until that job's G1 is actually moving.
+bool cutLatch=false;
+// True only while this job is on a pattern G1 (cleared by G0, M5, and job end).
+bool cutMove=false;
 void driveRelayPin(bool energize);
 void releaseIdleRelay();
 void applyRelayHold();
+void dropCutLatch();
+void noteJobLaser(const char* line);
+bool reinforceCut();
+static bool jobWord(const char* s,const char* w);
 
 char inputLine[JOB_MAX_LINE+1];
 unsigned used=0;
@@ -284,7 +294,7 @@ void handleLine(char* line){
   if(!count) return;
 
   // Any rejected command forces the laser OFF.
-  auto fail=[&](Reason r){ relayHold=false; motion.reject(r); releaseIdleRelay(); status(lastSeq); };
+  auto fail=[&](Reason r){ relayHold=false; cutLatch=false; cutMove=false; motion.reject(r); releaseIdleRelay(); status(lastSeq); };
 
   if(!strcmp(tokens[0],"F2")){
     uint32_t seq=0;
@@ -314,7 +324,8 @@ void handleLine(char* line){
   if(count==1 && (!strcasecmp(tokens[0],"STOP") || !strcmp(tokens[0],"!") || !strcasecmp(tokens[0],"M0") ||
                   !strcasecmp(tokens[0],"DISARM"))){
     storedJob=false; jobUpload=false;
-    motion.stop(Reason::Stop); status(ack); return;
+    relayHold=false; cutLatch=false; cutMove=false;
+    motion.stop(Reason::Stop); releaseIdleRelay(); status(ack); return;
   }
   if(count==1 && !strcasecmp(tokens[0],"STATUS")){ status(ack); return; }
   if(count==1 && !strcasecmp(tokens[0],"ARM")){
@@ -464,8 +475,8 @@ void handleLine(char* line){
   // M5 = laser relay OFF. PENUP/ZUP kept as harmless aliases for old clients.
   if(count>=1 && (!strcasecmp(tokens[0],"M5") || !strcasecmp(tokens[0],"LASEROFF") ||
                   !strcasecmp(tokens[0],"PENUP") || !strcasecmp(tokens[0],"ZUP"))){
-    relayHold=false;
-    motion.laserOff(); releaseIdleRelay(); motion.reason=Reason::LaserOff; status(ack); return;
+    relayHold=false; cutLatch=false; cutMove=false;
+    driveRelayPin(false); motion.reason=Reason::LaserOff; status(ack); return;
   }
 
   // LIMIT OFF  or  LIMIT <xmin> <xmax> <ymin> <ymax>   (millimetres, from the website)
@@ -511,6 +522,7 @@ void handleLine(char* line){
       feed=f; activeFeed=f;
     }
     if(!insideWork(startX,startY)){ fail(Reason::SoftLimit); return; }
+    dropCutLatch(); // start-point travel stays dark; the button hold is left alone
     motion.laser.off();
     motion.moveAbsoluteMm(startX,startY,false,feed,nowMs,nowUs);
     status(ack); return;
@@ -528,6 +540,7 @@ void handleLine(char* line){
       uint32_t f=0; if(!parseU32(tokens[3]+1,f)){ fail(Reason::BadCommand); return; }
       feed=f; activeFeed=f;
     } else if(count>=4 && parseU32(tokens[3],feed)){ activeFeed=feed; }
+    dropCutLatch(); // jog is travel: a pattern latch must not fire on the way
     motion.jogMm(axis,delta,feed,nowMs,nowUs); status(ack); return;
   }
 
@@ -535,7 +548,7 @@ void handleLine(char* line){
   bool isG0=!strcasecmp(tokens[0],"G0") || !strcasecmp(tokens[0],"G00");
   bool isG1=!strcasecmp(tokens[0],"G1") || !strcasecmp(tokens[0],"G01");
   if(isG0 || isG1){
-    if(isG0) motion.laser.off(); // before parsing anything
+    if(isG0){ cutMove=false; motion.toolOn=false; motion.bridge=false; driveRelayPin(false); }
     float xmm=motion.xMm(), ymm=motion.yMm();
     uint32_t feed=activeFeed;
     bool any=false, sawZ=false;
@@ -620,7 +633,7 @@ void handleLine(char* line){
 
 // ================= G-code jobs =================
 void emergencyStop(){
-  relayHold=false;
+  relayHold=false; cutLatch=false; cutMove=false;
   storedJob=false; jobUpload=false;
   motion.stop(Reason::Stop);   // laser/tool OFF, coils OFF, disarmed; job.tick() marks the job aborted
   releaseIdleRelay();
@@ -632,11 +645,14 @@ void emergencyStop(){
 void usbGcode(char* line){
   if(usbPending){ Serial.print("error:busy\n"); return; } // host must wait for the previous reply
   webMotion=false;
+  noteJobLaser(line);
   const char* err="";
   Submit r=job.submit(motion,line,JobSource::Usb,millis(),micros(),err);
+  if(r==Submit::Error){ dropCutLatch(); Serial.printf("error:%s\n",err); return; }
+  if(cutMove && (motion.busy() || motion.bridge)) reinforceCut();
+  else if(!relayHold) driveRelayPin(false);
   if(r==Submit::Ok) Serial.print("ok\n");
-  else if(r==Submit::Pending) usbPending=true;
-  else Serial.printf("error:%s\n",err);
+  else usbPending=true;
 }
 
 uint32_t countJobLines(const char* b,size_t n){
@@ -664,7 +680,7 @@ void beginStoredJob(uint32_t nowMs){
 void webJobService(){
   if(!storedJob || !job.running()) return;
   for(unsigned budget=0; budget<8 && storedJob && job.running() && !motion.busy(); ++budget){
-    if(jobPos>=jobLen){ job.finish(motion,"end"); status(lastSeq); return; }
+    if(jobPos>=jobLen){ job.finish(motion,"end"); relayHold=false; dropCutLatch(); status(lastSeq); return; }
     char line[JOB_MAX_LINE+1]; size_t n=0; bool tooLong=false;
     while(jobPos<jobLen && jobBuf[jobPos]!='\n'){
       char c=jobBuf[jobPos++];
@@ -674,16 +690,25 @@ void webJobService(){
     }
     if(jobPos<jobLen) jobPos++; // skip '\n'
     line[n]=0; jobLineNo++;
-    if(tooLong){ webJobErr="line_too_long"; job.abort(motion,"line_too_long"); status(lastSeq); return; }
+    if(tooLong){ webJobErr="line_too_long"; job.abort(motion,"line_too_long"); dropCutLatch(); status(lastSeq); return; }
     const char* q=line; while(*q==' ') ++q;
     if(!*q) continue;           // blank line
+    noteJobLaser(line);
     const char* err="";
     if(job.submit(motion,line,JobSource::Web,millis(),micros(),err)==Submit::Error){
       webJobErr=err;
       if(job.running()) job.abort(motion,err);
+      dropCutLatch();
       status(lastSeq);
       return;
     }
+    // M3 can close the coil while the head is still. Keep it closed only
+    // for a G1 that is already moving, or the brief bridge between segments.
+    if(cutMove && (motion.busy() || motion.bridge)) reinforceCut();
+    else if(!relayHold) driveRelayPin(false);
+    // One move per turn. Reading a later G1 while the approach G0 is still
+    // queued would light the relay for the travel to the pattern.
+    if(jobWord(q,"G0") || jobWord(q,"G00") || jobWord(q,"G1") || jobWord(q,"G01")) return;
   }
 }
 
@@ -766,7 +791,7 @@ void webSendStatus(){
 
 void webStop(){ // always allowed, no session/arm needed, non-blocking
   lastWebSeenMs=millis();
-  relayHold=false;
+  relayHold=false; cutLatch=false; cutMove=false;
   storedJob=false; jobUpload=false;
   motion.stop(Reason::Stop);
   releaseIdleRelay();
@@ -905,43 +930,155 @@ void setupWatchdog(){
   esp_task_wdt_add(NULL);
 }
 
-// Active-low: GPIO LOW closes the coil. Releasing the pin lets the module's
-// 5V pull-up open it. Active-high modules are driven the other way.
+// This module closes the coil when GPIO26 is driven high, so a commanded
+// on must be the opposite of the active-low config level. The pin stays an
+// output either way: INPUT let the case touch grounded metal and change state.
+// The on transition is written once so the relay does not chatter.
 void driveRelayPin(bool energize){
-  if(energize){
-    pinMode(LASER_RELAY_PIN, OUTPUT);
-    digitalWrite(LASER_RELAY_PIN, LASER_RELAY_ACTIVE_LOW ? LOW : HIGH);
-    motion.laser.set(true);
-  } else {
-    motion.laser.off();
-    if(LASER_RELAY_ACTIVE_LOW){
-      digitalWrite(LASER_RELAY_PIN, HIGH);
-      pinMode(LASER_RELAY_PIN, INPUT);
-    } else {
-      pinMode(LASER_RELAY_PIN, OUTPUT);
-      digitalWrite(LASER_RELAY_PIN, LOW);
+  const int level=energize
+      ? (LASER_RELAY_ACTIVE_LOW ? HIGH : LOW)
+      : (LASER_RELAY_ACTIVE_LOW ? LOW : HIGH);
+  if(!energize){
+    motion.laserLatched=false;
+    motion.bridge=false;
+    motion.toolOn=false;
+    if(coilClosed || motion.laser.on){
+      coilClosed=false;
+      motion.laser.off();
     }
+    // Latch the idle level before enabling the driver, so GPIO26 cannot
+    // glitch into the coil-closed level. Never leave this pin as INPUT.
+    digitalWrite(LASER_RELAY_PIN, level);
+    pinMode(LASER_RELAY_PIN, OUTPUT);
+    digitalWrite(LASER_RELAY_PIN, level);
+    return;
   }
+  // Latch first so motion.tick does not release the pin on the next pass.
+  motion.laserLatched=true;
+  motion.toolOn=true;
+  if(coilClosed && motion.laser.on){
+    digitalWrite(LASER_RELAY_PIN, level);
+    return;
+  }
+  coilClosed=true;
+  digitalWrite(LASER_RELAY_PIN, level);
+  pinMode(LASER_RELAY_PIN, OUTPUT);
+  digitalWrite(LASER_RELAY_PIN, level);
+  motion.laser.set(true);
+  // set() can return without driving if it already thinks the coil is on.
+  digitalWrite(LASER_RELAY_PIN, level);
+  pinMode(LASER_RELAY_PIN, OUTPUT);
+  digitalWrite(LASER_RELAY_PIN, level);
 }
 
-// Open the coil unless Laser ON is holding it and the head is not traveling.
+// Manual Laser ON holds the coil while idle. A pattern holds it only while
+// the head is tracing a G1. Either way the pin stays an output, so the
+// contacts stay shut and the laser actually gets power.
+bool coilShouldClose(){
+  if(!motion.armed) return false;
+  if(cutLatch && cutMove && (motion.busy() || motion.bridge)) return true;
+  if(relayHold && !motion.busy() && !storedJob) return true;
+  return false;
+}
+
+void serviceRelay(){
+  if(!coilShouldClose()){ driveRelayPin(false); return; }
+  if(motion.busy() && cutMove) motion.moveIsCut=true;
+  motion.reason=Reason::LaserOn;
+  driveRelayPin(true);
+}
+
+// Open the coil unless the Laser button is holding it while the machine is idle
+// and no pattern file is running. A stored cut opens the coil itself on G0/M5.
 void releaseIdleRelay(){
-  if(relayHold && motion.armed && !motion.busy()) return;
-  if(motion.laser.on && motion.busy()) return;
+  if(relayHold && motion.armed && !motion.busy() && !storedJob) return;
   driveRelayPin(false);
 }
 
 // Close the coil for a latched Laser ON while the machine is idle.
+// laserLatched stays set so motion.tick does not release the pin every loop.
 void applyRelayHold(){
   if(!relayHold || !motion.armed || motion.busy()) return;
+  motion.laserLatched=true;
   driveRelayPin(true);
+}
+
+// Pattern-cut latch off. Leaves the Laser button holding the coil while idle.
+void dropCutLatch(){
+  cutLatch=false;
+  cutMove=false;
+  motion.toolOn=false;
+  if(relayHold && motion.armed) return;
+  motion.bridge=false;
+  motion.laserLatched=false;
+  driveRelayPin(false);
+}
+
+// Close the coil only while the head is following a pattern G1.
+// Travel, the saved start point, and the idle gap before the first G1 stay open.
+// The short bridge keeps one cut from chattering between its G1 segments.
+// It never uses the Laser-button hold, so the coil cannot stay closed after M5.
+bool reinforceCut(){
+  if(!cutLatch || !cutMove || !motion.armed) return false;
+  if(motion.busy()){
+    motion.laserLatched=true;
+    motion.moveIsCut=true;
+    motion.reason=Reason::LaserOn;
+    driveRelayPin(true);
+    return true;
+  }
+  if(!motion.bridge) return false;
+  motion.laserLatched=true;
+  motion.reason=Reason::LaserOn;
+  driveRelayPin(true);
+  return true;
+}
+
+static bool jobWord(const char* s,const char* w){
+  size_t n=strlen(w);
+  if(strncasecmp(s,w,n)!=0) return false;
+  char c=s[n];
+  return c==0 || c==' ' || c=='\t' || c==';';
+}
+
+// A stored cut never closes the coil on M3. The coil closes later, and only
+// while a G1 of that cut is moving. G0 and M5 open it: approach, gaps between
+// pieces, and the return after a finished pattern stay dark.
+void noteJobLaser(const char* line){
+  while(*line==' ' || *line=='\t') ++line;
+  if(jobWord(line,"M3") || jobWord(line,"M4") || jobWord(line,"LASERON")){
+    cutLatch=true;
+    cutMove=false;
+    return;
+  }
+  if(jobWord(line,"M5") || jobWord(line,"LASEROFF") || jobWord(line,"PENUP") || jobWord(line,"ZUP")){
+    relayHold=false;
+    dropCutLatch();
+    motion.laserOff();
+    motion.reason=Reason::LaserOff;
+    return;
+  }
+  if(jobWord(line,"G0") || jobWord(line,"G00")){
+    cutMove=false;
+    relayHold=false;
+    motion.toolOn=false;
+    motion.laserLatched=false;
+    motion.bridge=false;
+    driveRelayPin(false);
+    return;
+  }
+  // Remember the cut, but do not energize yet. The loop closes the coil
+  // once this G1 is the move actually running.
+  if((jobWord(line,"G1") || jobWord(line,"G01")) && cutLatch) cutMove=true;
 }
 
 void setup(){
   // Relay OFF before anything else. Keep laser 12V and motor 5V supplies OFF while flashing.
-  releaseIdleRelay();
+  // coilClosed starts true so this writes the pin even though the software flag says off.
+  driveRelayPin(false);
   motion.begin();
-  releaseIdleRelay();
+  coilClosed=true; // begin() may have driven GPIO26 low again
+  driveRelayPin(false);
   Serial.setTxBufferSize(2048); // status lines never block the step loop
   Serial.begin(115200);
   recordBoot();
@@ -956,19 +1093,23 @@ void loop(){
   uint32_t nowMs=millis();
   uint32_t nowUs=micros();
   if(storedJob) motion.leaseMs=0; // a missing STATUS must not stop this file
+  // Tick can release the coil. Put the pin back after every tick, but only
+  // when the coil state actually changes — rewriting GPIO26 chatters the relay.
+  serviceRelay();
   motion.tick(nowMs,nowUs);
+  serviceRelay();
   webService(nowMs);
   motion.tick(millis(),micros());
-  // STOP and a lost arm clear the hold. Otherwise Laser ON drives the coil
-  // again after tick, which used to leave the status at laser_on with the
-  // relay open until a G1.
-  if(!motion.armed) relayHold=false;
-  if(relayHold) applyRelayHold();
-  else releaseIdleRelay();
+  serviceRelay();
+  if(!motion.armed){ relayHold=false; cutLatch=false; cutMove=false; }
+  serviceRelay();
 
   job.tick(motion,millis());
+  serviceRelay();
   if(storedJob && !job.running()){
     storedJob=false;
+    relayHold=false; // a finished pattern must leave the coil open
+    dropCutLatch();
     motion.leaseMs=HEARTBEAT_LEASE_MS; // arm timeout applies again only after the file ends
     motion.ping(millis());
   }
@@ -1013,5 +1154,6 @@ void loop(){
     }
   }
 
+  serviceRelay(); // last word in the loop: a wanted coil stays driven, not floating
   if((nowMs-lastStatusMs)>=200) status(lastSeq);
 }
